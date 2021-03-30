@@ -43,7 +43,6 @@ def check_polyIndel(polyList, key):
 			return(False)
 
 def main_function(result, pileup, vcf):
-	first_filter, first_format = True, True
 	for line in zip(result, pileup, vcf):
 		pileup_col, vcf_col =  line[1].strip(), line[2].strip()
 		## Process the header of the pileup VCF and add new lines 
@@ -51,7 +50,6 @@ def main_function(result, pileup, vcf):
 			if pileup_col.startswith('##'):
 				if pileup_col.startswith('##fileformat'):
 					print(pileup_col, '##FILTER=<ID=PASS,Description="All filters passed">', '##FILTER=<ID=LIKELY_GERMINAL,Description="Excess contamination in the normal">', '##INFO=<ID=RF,Number=1,Type=Float,Description="Regression value from the random forest algorithm">', sep='\n')
-					first_filter = False
 				else:
 					print(pileup_col)
 			else:
@@ -74,7 +72,7 @@ def main_function(result, pileup, vcf):
 			elif res_id != vcf_id:
 				vcf_col = next(vcf).strip().split()
 				vcf_id, vcf_qual = '_'.join(vcf_col[:2]), float(vcf_col[5])
-		
+				
 		## Cutoff
 		if args.pipeline == 'SNV':
 			real_qual = vcf_qual*(res_value**2)

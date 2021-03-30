@@ -210,7 +210,7 @@ def filter_indels(candidate_indels):
 				# Write interval size
 				mutations_interval.write('\t'.join(interval_dict.get(candidate))+'\n')
 				# Print mini.pileup.vcf
-				print(chrom, pos, output_name, ref, alt, '.', '.', 'VAF=%.3f' % float(MAF), 'DP:BQ:MQ:AD', '%i:%.1f:%.1f:%i' % (cov_norm, BQN, MQN, alt_count_norm), '%i:%.1f:%.1f:%i' % (cov_tum, BQT, MQT, alt_count_tum), sep='\t', end='\n')
+				print(chrom, pos, output_name, ref.upper(), alt.upper(), '.', '.', 'VAF=%.3f' % float(MAF), 'DP:BQ:MQ:AD', '%i:%.1f:%.1f:%i' % (cov_norm, BQN, MQN, alt_count_norm), '%i:%.1f:%.1f:%i' % (cov_tum, BQT, MQT, alt_count_tum), sep='\t', end='\n')
 
 				## Create the indel_features file
 				# Is the indel repeat in the region?

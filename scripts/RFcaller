@@ -581,7 +581,11 @@ somaticINDEL(){
 		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup
 	done
 	# Filter the mini pileup
-	cat ${merge_files} |sort -k1,1V -k2,2n |filterMPindels.py -i - -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf
+	cat ${merge_files} |grep -v -e '^#' -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' |sort -k1,1n -k2,2n > ${comparison}/somaticINDEL/tmp/tmp.merge
+	for z in X Y MT GL000 hs37d5; do
+		cat ${merge_files} |grep "^${z}" |sort -k1,1 -k2,2n >> ${comparison}/somaticINDEL/tmp/tmp.merge
+	done
+	filterMPindels.py -i ${comparison}/somaticINDEL/tmp/tmp.merge -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf
 	log "${comparison}" "_INDEL." "------ RESULT: $(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}') INDELs remaining"
 	# Remove tmp dir
 	rm -rf ${comparison}/somaticINDEL/tmp
@@ -700,12 +704,20 @@ refinement() {
 	if [ "$(cat ${comparison}/calling/polyIndel.pos |wc -l |awk '{print $1}')" -eq 0 ]; then
 		rm ${comparison}/calling/polyIndel.pos ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz.tbi
 		gunzip ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz
+		mv ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf ${comparison}/calling/.indel.tmp
 	else
 		bcftools view --threads 2 -v indels --include 'QUAL<40' -R ${comparison}/calling/polyIndel.pos -O z -o ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.filter.norm.vcf.gz
 		tabix ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz
-		bcftools concat -a -O u ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz | bcftools sort -o ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf -
+		bcftools concat -a -O v ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz > ${comparison}/calling/.indel.tmp
 		rm ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz.tbi ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz.tbi
 	fi
+
+	## Sort Indel vcf
+	grep '^#' ${comparison}/calling/.indel.tmp > ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
+	grep -v -e '^#' -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' ${comparison}/calling/.indel.tmp |sort -k1,1n -k2,2n >> ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
+	for z in X Y MT GL000 hs37d5; do
+		grep "^${z}" ${comparison}/calling/.indel.tmp |sort -k1,1 -k2,2n >> ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
+	done
 
 	###### Run the somaticSNV pipeline
 	process_id_SNV=''

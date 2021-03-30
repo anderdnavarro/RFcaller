@@ -173,7 +173,7 @@ def main_function(pileup):
 				MQN, MQT = decode_ASCII(mapping_norm), decode_ASCII(mapping_tum)
 
 				## Write the output
-				print(chrom, pos, args.output_name, ref, alt_tum, '.', '.', 'VAF=%.3f' % float(MAF), 'DP:BQ:MQ:AD', '%i:%.1f:%.1f:%i' % (cov_norm, BQN, MQN, alt_count_norm), '%i:%.1f:%.1f:%i' % (cov_tum, BQT, MQT, alt_count_tum), sep='\t', end='\n')
+				print(chrom, pos, args.output_name, ref.upper(), alt_tum.upper(), '.', '.', 'VAF=%.3f' % float(MAF), 'DP:BQ:MQ:AD', '%i:%.1f:%.1f:%i' % (cov_norm, BQN, MQN, alt_count_norm), '%i:%.1f:%.1f:%i' % (cov_tum, BQT, MQT, alt_count_tum), sep='\t', end='\n')
 				ND_pileup.write(chrom + "\t" + pos + "\t" + ref + "\t" + str(cov_norm) + "\t" + variants_norm + "\t" + baseq_norm + "\t" + mapping_norm + "\t" + str(','.join(positions_norm)) + "\n")
 				TD_pileup.write(chrom + "\t" + pos + "\t" + ref + "\t" + str(cov_tum) + "\t" + variants_tum + "\t" + baseq_tum + "\t" + mapping_tum + "\t" + str(','.join(positions_tum)) + "\n")
 				mutations_interval.write(chrom + '_' + pos + "\t" +  str(distance_position) + "\t" + str(mean_position) + "\n")
