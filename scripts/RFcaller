@@ -1,0 +1,1014 @@
+#!/bin/bash
+set -u
+
+###########################################################################
+# Description: 	A pipeline that uses read-level features and extra 
+#				trees/random forest algorithms for accurate and
+#				fast detection of somatic mutations in next generation 
+#				sequencing data
+# Authors: Ander Díaz-Navarro & Xose S. Puente
+# Organization: Universidad de Oviedo
+# Contact: ander.d.navarro@gmail.com
+###########################################################################
+
+#### Load defaults
+## General
+workDir=$(pwd)
+outputDir='.'
+bamsDir='/bams'
+threads=24
+assembly='GRCh37'
+positions='VCF'
+contamination=0.05
+clean='False'
+
+## Databases
+genome='/home/databases/hg19/hs37d5.fa.gz'
+dbSNP='/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz'
+
+## Pileup thresholds
+# SNV
+SNV_threshold=10.726
+TD_cov_SNV=7
+ND_cov_SNV=7
+TD_mut_SNV=3
+ND_mut_SNV=3
+# INDEL
+INDEL_threshold=32.1418
+polyINDEL_threshold=0.7723
+TD_cov_INDEL=7
+ND_cov_INDEL=7
+TD_mut_INDEL=4
+ND_mut_INDEL=2
+ND_window=10
+
+## Machine learning
+SNV_algorithm=$(dirname $0)'/regression_SNVs_algorithm_v3.4.pkl'
+INDEL_algorithm=$(dirname $0)'/regression_INDELs_algorithm_v4.3.pkl'
+
+#### Functions
+## Help function
+help(){
+	echo -e "
+Usage: RFcaller [options]"
+	echo -e "
+Options:
+  -i, --input		FILE	TSV FILE with the cases to analyze
+				It must contain the following columns:
+				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
+  -@			INT	Number of threads to use [${threads}]
+  -w, --workDir		DIR	Directory where run the pipeline [${workDir}]
+  -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
+  -o, --outputDir	STR	Name for the output directory [${outputDir}]
+  -g, --genome		FILE	Reference genome in FASTA format [${genome}]
+  -p, --dbSNP		FILE	VCF with common SNPs [${dbSNP}]
+  --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
+  --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
+  --assembly		STR	BCFTOOLS tag for ploidy to use in variant calling (choices: GRCh37/GRCh38) [${assembly}]
+  --TD_cov_SNV		INT	Minimum coverage for tumor (SNVs) [${TD_cov_SNV}]
+  --TD_cov_INDEL	INT	Minimum coverage for tumor (INDELs) [${TD_cov_INDEL}]
+  --ND_cov_SNV		INT	Minimum coverage for normal (SNVs) [${ND_cov_SNV}]
+  --ND_cov_INDEL	INT	Minimum coverage for normal (INDELs) [${ND_cov_INDEL}]
+  --TD_mut_SNV		INT	Minimum number of mutated reads in tumor (SNVs) [${TD_mut_SNV}]
+  --TD_mut_INDEL	INT	Minimum number of mutated reads in tumor (INDELs) [${TD_mut_INDEL}]
+  --ND_mut_SNV		INT	Maximum number of mutated reads in normal (SNVs) [${ND_mut_SNV}]
+  --ND_mut_INDEL	INT	Maximum number of mutated reads in normal (INDELs) [${ND_mut_INDEL}]
+  --ND_window		INT	Window size around a position to look for mutations in normal (INDELs) [${ND_window}]
+  --SNV_threshold	FLOAT	Minimum regression value to consider a SNV as good [${SNV_threshold}]
+  --INDEL_threshold	FLOAT	Minimum regression value to consider an INDEL as good [${INDEL_threshold}]
+  --polyINDEL_threshold	FLOAT	Minimum regression value to consider a polyINDEL as good [${polyINDEL_threshold}]
+  --clean		BOOLEAN	Remove all intermediate files (choices: True/False) [${clean}]
+  -h, --help			Show this help and exit
+"
+	exit 0
+}
+
+## Arguments
+argparse(){
+	if [ "$#" -lt 2 ]; then
+		help
+	fi
+
+	while [ "$#" -ne 0 ]; do
+		PARAM=$(echo -e $1 | awk -F= '{print $1}')
+		VALUE=$(echo -e $2 | awk -F= '{print $1}')
+		case ${PARAM} in
+			-@)
+			threads=${VALUE}
+			;;
+			-i | --input)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The file provided does not exist\n"
+				help
+			else
+				input=$(realpath ${VALUE})
+			fi
+			;;
+			-w | --workDir)
+			if [ ! -d ${VALUE} ]; then
+				echo -e "ERROR: The directory provided does not exist\n"
+				help
+			else
+				workDir=${VALUE}
+			fi
+			;;
+			-b | --bamsDir)
+			if [ ! -d ${VALUE} ]; then
+				echo -e "ERROR: The directory provided does not exist\n"
+				help
+			else
+				bamsDir=${VALUE}
+			fi
+			;;
+			-o | --outputDir)
+			outputDir=${VALUE}
+			;;
+			-g | --genome)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The genome provided does not exist\n"
+				help
+			elif [ ! -f ${VALUE}.fai ]; then
+				echo -e "ERROR: The genome must be indexed\n"
+				help
+			else
+				genome=$(realpath ${VALUE})
+			fi
+			;;
+			-p | --dbSNP)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The dbSNP provided does not exist\n"
+				help
+			else
+				dbSNP=$(realpath ${VALUE})
+			fi
+			;;
+			--positions)
+			if [ "${VALUE}" = "BED" ]; then
+				positions='BED'
+			elif [ "${VALUE}" != "VCF" ] && [ "${VALUE}" != "BED" ]; then
+				echo -e "ERROR: Positions argument must be a VCF or a BED file"
+				help
+			fi
+			;;
+			--contamination)
+			contamination=${VALUE}
+			;;
+			--assembly)
+			assembly=${VALUE}
+			;;
+			--TD_cov_SNV)
+			TD_cov_SNV=${VALUE}
+			;;
+			--TD_cov_INDEL)
+			TD_cov_INDEL=${VALUE}
+			;;
+			--ND_cov_SNV)
+			ND_cov_SNV=${VALUE}
+			;;
+			--ND_cov_INDEL)
+			ND_cov_INDEL=${VALUE}
+			;;
+			--TD_mut_SNV)
+			TD_mut_SNV=${VALUE}
+			;;
+			--TD_mut_INDEL)
+			TD_mut_INDEL=${VALUE}
+			;;
+			--ND_mut_SNV)
+			ND_mut_SNV=${VALUE}
+			;;
+			--ND_mut_INDEL)
+			ND_mut_INDEL=${VALUE}
+			;;
+			--ND_window)
+			ND_window=${VALUE}
+			;;
+			--SNV_threshold)
+			SNV_threshold=${VALUE}
+			;;
+			--INDEL_threshold)
+			INDEL_threshold=${VALUE}
+			;;
+			--polyINDEL_threshold)
+			polyINDEL_threshold=${VALUE}
+			;;
+			--clean)
+			if [ "${VALUE}" = "True" ]; then
+				clean='True'
+			elif [ "${VALUE}" != "False" ] && [ "${VALUE}" != "True" ]; then
+				echo -e "ERROR: Clean option must be True or False\n"
+				help
+			fi
+			;;
+			-h | --help)
+			help
+			;;
+			*)
+			echo -e "ERROR: Unknown parameter ${PARAM}\n"
+			help
+			;;
+		esac
+		shift
+		shift
+	done
+}
+
+## Write a log file
+log(){
+	d=$(date '+%Y-%m-%d  %H:%M')
+	if [ "$1" = "general" ]; then
+		echo -e "${d} // $3" >>${workDir}/${outputDir}/RFcaller${2}log
+	else
+		echo -e "${d} // $3" >>${workDir}/${outputDir}/$1/${1}_RFcaller${2}log
+	fi
+}
+
+## Control the number of threads to use
+multithreads(){
+	while [ "$(ps auxr |grep -e "bcftools mpileup" -e "samtools view" -e "samtools mpileup" |wc -l )" -ge "$1" ]; do
+		sleep 30
+	done
+
+	if [ "$2" != '-' ]; then	
+		if [ "$(jobs -r -p | wc -l)" -ge "$2" ]; then
+			wait -n
+		fi
+	fi
+}
+
+## If the file doesn't exist write an error
+exist(){
+	for i in "$@"; do
+		if [ ! -f ${i} ]; then
+			log "general" "." "ERROR: ${i} doesn't exist"
+			return 0
+		fi
+	done
+	return 1
+}
+
+## Detect if the sample is male or female
+detect_sex(){
+	sum_depth=0
+	n=0
+	## Check the coverage at SRY gene
+	if [ "${assembly}" = "GRCh37" ]; then
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2654896-2655740 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+	elif [ "${assembly}" = "GRCh38" ]; then
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2786855-2787682 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+	fi
+	
+	## If there are ≥ 5 reads it's a male
+	if [ "${SRYcov}" -ge 5 ]; then
+		sex='M'
+	else
+		sex='F'
+	fi
+}
+		
+## Extract a smaller BAM with only the readings overlapping mutations
+extract_reduced_BAM(){
+	## Arguments
+	name=$1
+	bam=$2
+	pipeline=$3
+	comparison=$4
+
+	## Create a tempral directory
+	mkdir ${comparison}/somatic${pipeline}/tmp_${name}
+
+	log "${comparison}" "_${pipeline}." "---- COMMAND: samtools view -u -T ${genome} -G 0x400 ${bam} REGIONS >>${comparison}/somatic${pipeline}/tmp_${name}/tmp_reduce_${name}.bam"
+
+	## Launch samtools view by regions which is faster than reading all the BAM
+	# Read the file with the positions
+	i=1
+	z=1
+	merge_files=''
+	process_id_view=''
+	cat ${comparison}/somatic${pipeline}/reduced.positions | { while read -r chrom pos; do
+		if [ "${pipeline}" = "SNV" ]; then
+			start=$(echo -e ${pos} |awk '{$1-=10} END {print $1}')
+			end=$(echo -e ${pos} |awk '{$1+=10} END {print $1}')
+		elif [ "${pipeline}" = "INDEL" ]; then
+			start=$(echo -e ${pos} |awk '{$1-=30} END {print $1}')
+			end=$(echo -e ${pos} |awk '{$1+=30} END {print $1}')
+		fi
+		extended_region=${chrom}:${start}-${end}
+		echo -e ${extended_region} |tr "\n" "\t" >>${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed
+
+		# If there are 5000 regions, then extract readings overlaping these regions
+		i=$(echo -e ${i} |awk '{$1+=1} END {print $1}')
+		if [ ${i} -eq 5000 ]; then
+			samtools view -u -T ${genome} -G 0x400 ${bam} $(cat ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed) >${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam &
+			process_id_view=$!
+			i=1
+			merge_files="${merge_files} ${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam"
+			z=$(echo -e ${z} |awk '{$1+=1} END {print $1}')
+		fi
+
+		# Control the number of threads
+		multithreads ${threads} 4
+
+	done
+	# Launch samtools with last regions
+	if [ -f ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed ]; then
+		samtools view -u -T ${genome} -G 0x400 ${bam} $(cat ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed) >${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam
+		merge_files="${merge_files} ${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam"
+	fi
+	wait ${process_id_view}
+
+	## Sort SAM by read and filter duplicate reads, then sort by pos and finally index it
+	log "${comparison}" "_${pipeline}." "---- Removing duplicates reads for ${name}"
+	if [ "${threads}" -le 6 ]; then
+		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 1 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 1 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
+		samtools merge -u - ${merge_files} |samtools sort -@ 1 -n -O SAM - |removeOverlapping.py |samtools sort -@ 1 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
+	elif [ "${threads}" -le 12 ]; then
+		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 3 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 3 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
+		samtools merge -u - ${merge_files} |samtools sort -@ 3 -n -O SAM - |removeOverlapping.py |samtools sort -@ 3 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
+	else
+		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 6 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 6 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
+		samtools merge -u - ${merge_files} |samtools sort -@ 6 -n -O SAM - |removeOverlapping.py |samtools sort -@ 6 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
+	fi }
+	samtools index ${comparison}/somatic${pipeline}/reduced_${name}.bam
+	rm -rf ${comparison}/somatic${pipeline}/tmp_${name}
+}
+
+## Extract statistics from the normal and reduced BAM for each mutation
+extract_BAM_stats(){
+	## Arguments
+	name=$1
+	pipeline=$2
+	comparison=$3
+
+	## Extract the mapping quality
+	if [ ${pipeline} = "SNV" ]; then
+		log "${comparison}" "_${pipeline}." "-- Extracting the mapping quality for reads supporting each SNV for ${name}"
+		log "${comparison}" "_${pipeline}." "---- COMMAND: samtools mpileup -aa -R -B -s -f ${genome} -l ${comparison}/somaticSNV/common.positions ${comparison}/somaticSNV/reduced_${name}.bam >${comparison}/somaticSNV/${name}.mapq"
+		samtools mpileup -aa -R -B -s -Q 10 -f ${genome} -l ${comparison}/somaticSNV/common.positions ${comparison}/somaticSNV/reduced_${name}.bam >${comparison}/somaticSNV/${name}.mapq &
+		process_id_mapq=$!
+	elif [ ${pipeline} = 'INDEL' ]; then
+		log "${comparison}" "_${pipeline}." "-- Extracting the mapping quality for reads supporting each INDEL for ${name}"
+		log "${comparison}" "_${pipeline}." "---- COMMAND: samtools mpileup -aa -R -s -f ${genome} -l ${comparison}/somaticINDEL/common.positions ${comparison}/somaticINDEL/reduced_${name}.bam >${comparison}/somaticINDEL/${name}.mapq"
+		samtools mpileup -aa -R -s -Q 10 -f ${genome} -l ${comparison}/somaticINDEL/short_common.positions ${comparison}/somaticINDEL/reduced_${name}.bam >${comparison}/somaticINDEL/${name}_short.mapq &
+		process_id_mapq=$!
+		samtools mpileup -aa -R -B -s -Q 10 -f ${genome} -l ${comparison}/somaticINDEL/long_common.positions ${comparison}/somaticINDEL/reduced_${name}.bam >${comparison}/somaticINDEL/${name}_long.mapq &
+		process_id_mapq="${process_id_mapq} $!"
+	fi
+
+	## Extract alignmet stats
+	log "${comparison}" "_${pipeline}." "-- Extracting alignment stats for ${name}"
+	# Prepare the header of output files
+	echo -e "#Case\t${name}_bases\t${name}_mismatches" >${comparison}/somatic${pipeline}/${name}.stats
+	echo -e "#Case\t${name}_cigar" >${comparison}/somatic${pipeline}/${name}.cigar
+	if [ ${pipeline} = 'INDEL' ]; then
+		echo -e "#Case\t${name}_insertion_count\t${name}_insertion_lenght\t${name}_deletion_count\t${name}_deletion_lenght" >${comparison}/somatic${pipeline}/${name}.distribution
+	fi
+	# Read the file with the positions
+	cat ${comparison}/somatic${pipeline}/common.positions |while read -r chrom pos; do
+		pos_name=${chrom}_${pos}
+		if [ "${pipeline}" = "SNV" ]; then
+			start=$(echo -e ${pos} |awk '{$1-=10} END {print $1}')
+			end=$(echo -e ${pos} |awk '{$1+=10} END {print $1}')
+		elif [ "${pipeline}" = "INDEL" ]; then
+			start=$(echo -e ${pos} |awk '{$1-=15} END {print $1}')
+			end=$(echo -e ${pos} |awk '{$1+=15} END {print $1}')
+		fi
+		extended_region=${chrom}:${start}-${end}
+		# Create temporal bam
+		samtools view -uh ${comparison}/somatic${pipeline}/reduced_${name}.bam ${extended_region} >${comparison}/somatic${pipeline}/tmp_${name}.bam
+		samtools index ${comparison}/somatic${pipeline}/tmp_${name}.bam
+		# Get the stats
+		samtools stats -d -r ${genome} ${comparison}/somatic${pipeline}/tmp_${name}.bam ${chrom}:${pos}-${pos} >${comparison}/somatic${pipeline}/tmp_${name}.stats
+		bases_mapped=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^bases mapped (cigar)' |awk '{print $4}')
+		mismatches=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^mismatches' |awk '{print $2}')
+		echo -e "${pos_name}\t${bases_mapped}\t${mismatches}" >>${comparison}/somatic${pipeline}/${name}.stats
+		if [ "${pipeline}" = "INDEL" ]; then
+			indel_distribution=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep ^ID |cut -f 2- |filterDist.py -i -)
+			echo -e "${pos_name}\t${indel_distribution}" >>${comparison}/somatic${pipeline}/${name}.distribution
+		fi
+		# Get the cigar
+		cigar=$(samtools view ${comparison}/somatic${pipeline}/tmp_${name}.bam |awk '{print $6}' |tr '\n' ';')
+		echo -e "${pos_name}\t${cigar}" >>${comparison}/somatic${pipeline}/${name}.cigar
+	done
+	rm ${comparison}/somatic${pipeline}/tmp_${name}.bam* ${comparison}/somatic${pipeline}/tmp_${name}.stats
+
+	## Wait until mapq is finished
+	wait ${process_id_mapq}
+	if [ ${pipeline} = 'INDEL' ]; then
+		cat ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq | sort -k1,1V -k2,2n > ${comparison}/somaticINDEL/${name}.mapq
+		rm ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq
+	fi
+}
+
+somaticSNV(){
+	normal=$1
+	normal_bam=$2
+	tumor=$3
+	tumor_bam=$4
+	comparison=$5
+
+	log "${comparison}" "_SNV." "#######   Looking for SNVs   #######"
+	#### Third step: Extract a reduced BAM with only the readings overlapping mutations
+	mkdir ${comparison}/somaticSNV
+
+	## Reduced bam
+	log "${comparison}" "_SNV." "-- Extracting a reduced BAM with only readings overlapping mutations"
+	grep -v '^#' ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf |awk '{print $1"\t"$2}' >${comparison}/somaticSNV/reduced.positions
+	extract_reduced_BAM ${normal} ${normal_bam} SNV ${comparison} &
+	process_id_reduced_BAM=$!
+	extract_reduced_BAM ${tumor} ${tumor_bam} SNV ${comparison} &
+	process_id_reduced_BAM="${process_id_reduced_BAM} $!"
+	wait ${process_id_reduced_BAM}
+
+	#### Fourth step: Extract the mini.pileup
+	log "${comparison}" "_SNV." "Processing SNVs"
+
+	## Extract the mini.pileup
+	# Make a new temporal dir
+	mkdir ${comparison}/somaticSNV/tmp
+	merge_files=''
+	process_id_pileup_SNV=''
+	# Samtools mpileup
+	log "${comparison}" "_SNV." "-- Extracting the mini.pileup. This may take a while..."
+	reads_length=$(samtools view ${comparison}/somaticSNV/reduced_${normal}.bam |head -n1 |awk '{print $10}' |wc -m)
+	log "${comparison}" "_SNV." "---- COMMAND: samtools mpileup -aa -R -B -q 30/20 -Q 20/10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticSNV/reduced.positions ${comparison}/somaticSNV/reduced_${tumor}.bam ${comparison}/somaticSNV/reduced_${normal}.bam |awk '\$3!=\"*\"' |filterMP.py -i - -Tcov ${TD_cov_SNV} -Ncov ${ND_cov_SNV} -Tmut ${TD_mut_SNV} -Nmut ${ND_mut_SNV} --output_dir ${comparison}/somaticSNV --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticSNV/${comparison}.mini.pileup.vcf"
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		samtools mpileup -aa -R -B -q 30 -Q 20 -C 50 -s -O --output-QNAME -f ${genome} -l ${comparison}/somaticSNV/reduced.positions -r ${i} ${comparison}/somaticSNV/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticSNV/tmp/${i}.tumor.mini.pileup &
+		process_id_pileup_SNV="${process_id_pileup_SNV} $!"
+		samtools mpileup -aa -R -B -q 20 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticSNV/reduced.positions -r ${i} ${comparison}/somaticSNV/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticSNV/tmp/${i}.normal.mini.pileup &
+		process_id_pileup_SNV="${process_id_pileup_SNV} $!"
+		merge_files="${merge_files} ${comparison}/somaticSNV/tmp/${i}.mini.pileup"
+		# Control the number of threads
+		multithreads ${threads} 6
+	done
+	wait ${process_id_pileup_SNV}
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticSNV/tmp/${i}.normal.mini.pileup |paste ${comparison}/somaticSNV/tmp/${i}.tumor.mini.pileup - >${comparison}/somaticSNV/tmp/${i}.mini.pileup
+	done
+	# Filter the mini pileup
+	cat ${merge_files} |filterMP.py -i - -Tcov ${TD_cov_SNV} -Ncov ${ND_cov_SNV} -Tmut ${TD_mut_SNV} -Nmut ${ND_mut_SNV} --output_dir ${comparison}/somaticSNV --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticSNV/${comparison}.mini.pileup.vcf
+	log "${comparison}" "_SNV." "------ RESULT: $(grep -v '^#' ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}') SNVs remaining"
+	# Remove tmp dir
+	rm -rf ${comparison}/somaticSNV/tmp
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		return 1
+	fi
+
+	## Get common.positions
+	grep -v '^#' ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf |awk '{print $1"\t"$2}' >${comparison}/somaticSNV/common.positions
+
+	#### Fifth step: Get the necessary files to run the machine learning algorithm
+	log "${comparison}" "_SNV." "Getting the statistics needed to run the algorithm"
+
+	## Context stats
+	log "${comparison}" "_SNV." "-- Extracting information about the context"
+	log "${comparison}" "_SNV." "---- COMMAND: checkSequence.py -p ${comparison}/somaticSNV/common.positions -r ${genome} >${comparison}/somaticSNV/${comparison}.sequence"
+	checkSequence.py -p ${comparison}/somaticSNV/common.positions -r ${genome} >${comparison}/somaticSNV/${comparison}.sequence &
+
+	## BAM stats
+	extract_BAM_stats ${normal} SNV ${comparison} &
+	process_id_BAM_stats=$!
+	sleep 5
+	extract_BAM_stats ${tumor} SNV ${comparison} &
+	process_id_BAM_stats="${process_id_BAM_stats} $!"
+	wait ${process_id_BAM_stats}
+
+	## Merge cigar and stats files
+	log "${comparison}" "_SNV." "-- Merging cigar and stats files"
+	# Stats
+	cat ${comparison}/somaticSNV/${tumor}.stats |awk '{print $2"\t"$3}' |paste ${comparison}/somaticSNV/${normal}.stats - >${comparison}/somaticSNV/${comparison}.stats
+	# Cigar
+	cat ${comparison}/somaticSNV/${tumor}.cigar |awk '{print $2}' |paste ${comparison}/somaticSNV/${normal}.cigar - >${comparison}/somaticSNV/${comparison}.cigar
+
+	## Prepare the final file with previous features
+	log "${comparison}" "_SNV." "-- Preparing the CSV"
+	log "${comparison}" "_SNV." "---- COMMAND: prepareCSV.py --ND_pileup ${comparison}/somaticSNV/${normal}.mini.pileup --TD_pileup ${comparison}/somaticSNV/${tumor}.mini.pileup --ND_mapq ${comparison}/somaticSNV/${normal}.mapq --TD_mapq ${comparison}/somaticSNV/${tumor}.mapq --stats ${comparison}/somaticSNV/${comparison}.stats --cigar ${comparison}/somaticSNV/${comparison}.cigar --sequence ${comparison}/somaticSNV/${comparison}.sequence --interval ${comparison}/somaticSNV/${comparison}.mutations.interval --name ${comparison} --read_names ${comparison}/somaticSNV/${tumor}.read.names --tumor_bam ${comparison}/somaticSNV/reduced_${tumor}.bam --tumor_mut_reads ${TD_mut_SNV} >${comparison}/somaticSNV/${comparison}.prepare_muts.csv"
+	prepareCSV.py --ND_pileup ${comparison}/somaticSNV/${normal}.mini.pileup --TD_pileup ${comparison}/somaticSNV/${tumor}.mini.pileup --ND_mapq ${comparison}/somaticSNV/${normal}.mapq --TD_mapq ${comparison}/somaticSNV/${tumor}.mapq --stats ${comparison}/somaticSNV/${comparison}.stats --cigar ${comparison}/somaticSNV/${comparison}.cigar --sequence ${comparison}/somaticSNV/${comparison}.sequence --interval ${comparison}/somaticSNV/${comparison}.mutations.interval --name ${comparison} --read_names ${comparison}/somaticSNV/${tumor}.read.names --tumor_bam ${comparison}/somaticSNV/reduced_${tumor}.bam --tumor_mut_reads ${TD_mut_SNV} >${comparison}/somaticSNV/${comparison}.prepare_muts.csv
+	log "${comparison}" "_SNV." "------ RESULT: $(( $(wc -l ${comparison}/somaticSNV/common.positions |awk '{print $1}')-$(grep -v '^#' ${comparison}/somaticSNV/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}') )) mutations have been removed because they weren't real SNVs"
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticSNV/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		return 1
+	fi
+
+	#### Sixth step: Run the machine learning algorithm
+	log "${comparison}" "_SNV." "Machine learning algorithm for SNVs"
+
+	## Run the algorithm
+	log "${comparison}" "_SNV." "-- Running the regression algorithm to detect somatic SNVs"
+	log "${comparison}" "_SNV." "---- COMMAND: runRF.py -a ${SNV_algorithm} -i ${comparison}/somaticSNV/${comparison}.prepare_muts.csv >${comparison}/somaticSNV/regression_results_SNVs_${comparison}.txt"
+	runRF.py -a ${SNV_algorithm} -i ${comparison}/somaticSNV/${comparison}.prepare_muts.csv >${comparison}/somaticSNV/regression_results_SNVs_${comparison}.txt
+
+	## Process the results
+	log "${comparison}" "_SNV." "-- Processing results"
+	log "${comparison}" "_SNV." "---- COMMAND: filterRF.py -i ${comparison}/somaticSNV/regression_results_SNVs_${comparison}.txt --pileup ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf --threshold ${SNV_threshold} --pipeline SNV --contamination ${contamination} |fixDinucleotides.py -i - -r ${comparison}/somaticSNV/${tumor}.read.names -f ${genome} >${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf"
+	filterRF.py -i ${comparison}/somaticSNV/regression_results_SNVs_${comparison}.txt --pileup ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf --threshold ${SNV_threshold} --pipeline SNV --contamination ${contamination} |fixDinucleotides.py -i - -r ${comparison}/somaticSNV/${tumor}.read.names -f ${genome} >${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf
+	# Print the final result
+	log "${comparison}" "_SNV." "------ RESULT: $(grep -v '^#' ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf |wc -l |awk '{print $1}') of $(wc -l ${comparison}/somaticSNV/regression_results_SNVs_${comparison}.txt |awk '{print $1}') SNVs have passed the filter (cutoff = ${SNV_threshold})"
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		return 1
+	fi
+
+	## Compress and index the final VCF
+	bgzip ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf
+	tabix ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz
+
+	return 0
+}
+
+somaticINDEL(){
+	normal=$1
+	normal_bam=$2
+	tumor=$3
+	tumor_bam=$4
+	comparison=$5
+	
+	log "${comparison}" "_INDEL." "#######   Looking for INDELs   #######"
+	#### Third step: Extract a reduced BAM with only the readings overlapping mutations
+	## Change to a new directory 
+	mkdir ${comparison}/somaticINDEL
+
+	log "${comparison}" "_INDEL." "-- Extracting a reduced BAM with only readings overlapping mutations"
+	splitLongIndels.py -i ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf -s 7 -o ${comparison}/somaticINDEL -b reduced.positions
+	extract_reduced_BAM ${normal} ${normal_bam} INDEL ${comparison} &
+	process_id_reduced_BAM=$!
+	extract_reduced_BAM ${tumor} ${tumor_bam} INDEL ${comparison} &
+	process_id_reduced_BAM="${process_id_reduced_BAM} $!"
+	wait ${process_id_reduced_BAM}
+
+	#### Fourth step: Extract the indel.mini.pileup
+	log "${comparison}" "_INDEL." "Processing INDELs"
+
+	## Extract the indel.mini.pileup
+	# Make a new temporal dir and change to it
+	mkdir ${comparison}/somaticINDEL/tmp
+	merge_files=''
+	process_id_pileup_INDEL=''
+	# Samtools mpileup short indels
+	log "${comparison}" "_INDEL." "-- Extracting the indel.mini.pileup. This may take a while..."
+	reads_length=$(samtools view ${comparison}/somaticINDEL/reduced_${normal}.bam |head -n1 |awk '{print $10}' |wc -m)
+	log "${comparison}" "_INDEL." "---- COMMAND: samtools mpileup -aa -R -q 40/30 -Q 20/10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/reduced.positions ${comparison}/somaticINDEL/reduced_${tumor}.bam ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '\$3!=\"*\"' |filterMPindels.py -i - -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL/ --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf"
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		samtools mpileup -aa -R -q 40 -Q 15 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/short_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.tumor.short_indel.mini.pileup &
+		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
+		samtools mpileup -aa -R -q 30 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/short_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.normal.short_indel.mini.pileup &
+		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
+		merge_files="${merge_files} ${comparison}/somaticINDEL/tmp/${i}.short_indel.mini.pileup"
+		# Control the number of threads
+		multithreads ${threads} 6
+	done
+	wait ${process_id_pileup_INDEL}
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.short_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.short_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.short_indel.mini.pileup
+	done
+	# Samtools mpileup long indels
+	process_id_pileup_INDEL=''
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		samtools mpileup -aa -R -B -q 40 -Q 20 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/long_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup &
+		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
+		samtools mpileup -aa -R -B -q 30 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/long_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup &
+		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
+		merge_files="${merge_files} ${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup"
+		# Control the number of threads
+		multithreads ${threads} 6
+	done
+	wait ${process_id_pileup_INDEL}
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup
+	done
+	# Filter the mini pileup
+	cat ${merge_files} |sort -k1,1V -k2,2n |filterMPindels.py -i - -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf
+	log "${comparison}" "_INDEL." "------ RESULT: $(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}') INDELs remaining"
+	# Remove tmp dir
+	rm -rf ${comparison}/somaticINDEL/tmp
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		return 1
+	fi
+	
+	## Get common.positions
+	splitLongIndels.py -i ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf -s 7 -o ${comparison}/somaticINDEL -b common.positions
+
+	#### Fifth step: Get the necessary files to run the machine learning algorithm
+	log "${comparison}" "_INDEL." "Getting the statistics needed to run the algorithm for INDELs"
+
+	## Context stats
+	log "${comparison}" "_INDEL." "-- Extracting information about the context"
+	log "${comparison}" "_INDEL." "---- COMMAND: checkSequence.py -p ${comparison}/somaticINDEL/common.positions -r ${genome} >${comparison}/somaticINDEL/${comparison}.sequence"
+	checkSequence.py -p ${comparison}/somaticINDEL/common.positions -r ${genome} >${comparison}/somaticINDEL/${comparison}.sequence &
+
+	## BAM stats
+	extract_BAM_stats ${normal} INDEL ${comparison} &
+	process_id_BAM_stats=$!
+	sleep 5
+	extract_BAM_stats ${tumor} INDEL ${comparison} &
+	process_id_BAM_stats="${process_id_BAM_stats} $!"
+	wait ${process_id_BAM_stats}
+
+	## Merge cigar and stats files
+	log "${comparison}" "_INDEL." "-- Merging cigar and stats files"
+	# Stats
+	cat ${comparison}/somaticINDEL/${tumor}.stats |awk '{print $2"\t"$3}' |paste ${comparison}/somaticINDEL/${normal}.stats - >${comparison}/somaticINDEL/${comparison}.stats
+	# Cigar
+	cat ${comparison}/somaticINDEL/${tumor}.cigar |awk '{print $2}' |paste ${comparison}/somaticINDEL/${normal}.cigar - >${comparison}/somaticINDEL/${comparison}.cigar
+	# Distribution
+	cat ${comparison}/somaticINDEL/${tumor}.distribution |awk '{print $2"\t"$3"\t"$4"\t"$5}' |paste ${comparison}/somaticINDEL/${normal}.distribution - >${comparison}/somaticINDEL/${comparison}.distribution
+
+	## Prepare the final file with previous features
+	log "${comparison}" "_INDEL." "-- Preparing the CSV"
+	log "${comparison}" "_INDEL." "---- COMMAND: prepareCSVindels.py --ND_pileup ${comparison}/somaticINDEL/${normal}.mini.pileup --TD_pileup ${comparison}/somaticINDEL/${tumor}.mini.pileup --ND_mapq ${comparison}/somaticINDEL/${normal}.mapq --TD_mapq ${comparison}/somaticINDEL/${tumor}.mapq --stats ${comparison}/somaticINDEL/${comparison}.stats --cigar ${comparison}/somaticINDEL/${comparison}.cigar --sequence ${comparison}/somaticINDEL/${comparison}.sequence --interval ${comparison}/somaticINDEL/${comparison}.mutations.interval --distribution ${comparison}/somaticINDEL/${comparison}.distribution --features ${comparison}/somaticINDEL/${comparison}.features --name ${comparison} >${comparison}/somaticINDEL/${comparison}.prepare_muts.csv"
+	prepareCSVindels.py --ND_pileup ${comparison}/somaticINDEL/${normal}.mini.pileup --TD_pileup ${comparison}/somaticINDEL/${tumor}.mini.pileup --ND_mapq ${comparison}/somaticINDEL/${normal}.mapq --TD_mapq ${comparison}/somaticINDEL/${tumor}.mapq --stats ${comparison}/somaticINDEL/${comparison}.stats --cigar ${comparison}/somaticINDEL/${comparison}.cigar --sequence ${comparison}/somaticINDEL/${comparison}.sequence --interval ${comparison}/somaticINDEL/${comparison}.mutations.interval --distribution ${comparison}/somaticINDEL/${comparison}.distribution --features ${comparison}/somaticINDEL/${comparison}.features --name ${comparison} >${comparison}/somaticINDEL/${comparison}.prepare_muts.csv
+	log "${comparison}" "_INDEL." "------ RESULT: $(( $(wc -l ${comparison}/somaticINDEL/common.positions |awk '{print $1}')-$(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}') )) mutations have been removed because they weren't real INDELs"
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		return 1
+	fi
+
+	#### Sixth step: Run the machine learning algorithm
+	log "${comparison}" "_INDEL." "Machine learning algorithm for INDELs"
+
+	## Run the algorithm
+	log "${comparison}" "_INDEL." "-- Running the regression algorithm to detect somatic INDELs"
+	log "${comparison}" "_INDEL." "---- COMMAND: runRF.py -a ${INDEL_algorithm} -i ${comparison}/somaticINDEL/${comparison}.prepare_muts.csv >${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt"
+	runRF.py -a ${INDEL_algorithm} -i ${comparison}/somaticINDEL/${comparison}.prepare_muts.csv >${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt
+
+	## Process the results
+	log "${comparison}" "_INDEL." "-- Processing results"
+	if [ -f ${comparison}/calling/polyIndel.pos ]; then
+		log "${comparison}" "_INDEL." "---- COMMAND: filterRF.py -i ${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt --pileup ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf --threshold ${INDEL_threshold} --pipeline INDEL --polyIndel_threshold ${polyINDEL_threshold} --polyIndel_list ${comparison}/calling/polyIndel.pos --contamination ${contamination} >${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf"
+		filterRF.py -i ${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt --pileup ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf --threshold ${INDEL_threshold} --pipeline INDEL --polyIndel_threshold ${polyINDEL_threshold} --polyIndel_list ${comparison}/calling/polyIndel.pos --contamination ${contamination} >${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf
+	else
+		log "${comparison}" "_INDEL." "---- COMMAND: filterRF.py -i ${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt --pileup ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf --threshold ${INDEL_threshold} --pipeline INDEL --contamination ${contamination} >${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf"
+		filterRF.py -i ${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt --pileup ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf --vcf ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf --threshold ${INDEL_threshold} --pipeline INDEL --contamination ${contamination} >${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf
+	fi
+
+	## Print the final result
+	log "${comparison}" "_INDEL." "------ RESULT: $(grep -v '^#' ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf |wc -l |awk '{print $1}') of $(wc -l ${comparison}/somaticINDEL/regression_results_INDELs_${comparison}.txt |awk '{print $1}') INDELs have passed the filter (cutoff = ${INDEL_threshold})"
+	# Check that there are mutations to continue the pipeline
+	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		return 1
+	fi
+
+	## Compress and index the final VCF
+	bgzip ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf
+	tabix ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz
+
+	return 0
+}
+
+refinement() {
+	normal=$1
+	normal_bam=$2
+	tumor=$3
+	tumor_bam=$4
+	comparison=$5
+
+	#### Second step: Filter the VCF and select SNVs
+	log "${comparison}" "." "Filtering the VCF"
+
+	## Normalize indels
+	log "${comparison}" "." "-- Normalizing indels"
+	log "${comparison}" "." "---- COMMAND: bcftools norm --threads ${threads} -f ${genome} -c w -O z -o ${comparison}/calling/${comparison}.norm.vcf.gz ${comparison}/calling/${comparison}.vcf.gz"
+	log "${comparison}" "." "------ RESULT: $(bcftools norm --threads ${threads} -f ${genome} -c w -O z -o ${comparison}/calling/${comparison}.norm.vcf.gz ${comparison}/calling/${comparison}.vcf.gz 2>&1 |grep Lines)"
+	tabix ${comparison}/calling/${comparison}.norm.vcf.gz
+
+	## Label SNPs and filter them
+	log "${comparison}" "." "-- Filtering SNPs and very low confident positions"
+	log "${comparison}" "." "---- COMMAND: bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID==\".\" & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT=\"mis\"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -"
+	bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID=="." & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT="mis"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -
+	tabix ${comparison}/calling/${comparison}.filter.norm.vcf.gz
+	log "${comparison}" "." "------ RESULT: $(( $(bcftools view -H ${comparison}/calling/${comparison}.norm.vcf.gz |wc -l |awk '{print $1}')-$(bcftools view -H ${comparison}/calling/${comparison}.filter.norm.vcf.gz |wc -l |awk '{print $1}') )) positions have been filtered. $(bcftools view -H ${comparison}/calling/${comparison}.filter.norm.vcf.gz |wc -l |awk '{print $1}') mutations remaining"
+
+	## Extract substitutions and indels to independent files
+	log "${comparison}" "." "-- Splitting substitutions and INDELs to independent files"
+	# SNVs
+	bcftools view --threads 2 -v snps --include 'QUAL>=15' -O v -o ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf ${comparison}/calling/${comparison}.filter.norm.vcf.gz
+	# INDELs
+	bcftools view --threads 2 -v indels --include 'QUAL>=40' -O z -o ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.filter.norm.vcf.gz
+	tabix ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz
+	log "${comparison}" "." "---- RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf |wc -l |awk '{print $1}') SNVs and $(bcftools view -H ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz |wc -l |awk '{print $1}') INDELs with enough quality"
+
+	## Extract polyIndels
+	bcftools view --threads 2 -H -v indels --include 'QUAL<40' ${comparison}/calling/${comparison}.vcf.gz | filterPolyindels.py --input - > ${comparison}/calling/polyIndel.pos
+	if [ "$(cat ${comparison}/calling/polyIndel.pos |wc -l |awk '{print $1}')" -eq 0 ]; then
+		rm ${comparison}/calling/polyIndel.pos ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz.tbi
+		gunzip ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz
+	else
+		bcftools view --threads 2 -v indels --include 'QUAL<40' -R ${comparison}/calling/polyIndel.pos -O z -o ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.filter.norm.vcf.gz
+		tabix ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz
+		bcftools concat -a -O u ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz | bcftools sort -o ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf -
+		rm ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf.gz.tbi ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz ${comparison}/calling/${comparison}.polyINDELs.filter.norm.vcf.gz.tbi
+	fi
+
+	###### Run the somaticSNV pipeline
+	process_id_SNV=''
+	if [ "$(bcftools view -H ${comparison}/calling/${comparison}.SNVs.filter.norm.vcf |wc -l |awk '{print $1}')" -gt 0 ]; then
+		somaticSNV ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} &
+		process_id_SNV=$!
+	fi
+	
+	###### Run the somaticINDEL pipeline
+	process_id_INDEL=''
+	if [ "$(bcftools view -H ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf |wc -l |awk '{print $1}')" -gt 0 ]; then
+		somaticINDEL ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} &
+		process_id_INDEL=$!
+	fi
+	
+	###### Merge both results
+	## Check the status of the SNVs and INDELs pipelines
+	if [ "${process_id_SNV}" = "" ]; then
+		resSNV=1
+	else
+		wait ${process_id_SNV}
+		resSNV=$?
+	fi
+	if [ "${process_id_INDEL}" = "" ]; then
+		resINDEL=1
+	else
+		wait ${process_id_INDEL}
+		resINDEL=$?
+	fi
+
+	## Merge logs
+	if [ -f ${comparison}/${comparison}_RFcaller_SNV.log ]; then
+		cat ${comparison}/${comparison}_RFcaller_SNV.log >>${comparison}/${comparison}_RFcaller.log
+		rm ${comparison}/${comparison}_RFcaller_SNV.log
+	fi
+	if [ -f ${comparison}/${comparison}_RFcaller_INDEL.log ]; then
+		cat ${comparison}/${comparison}_RFcaller_INDEL.log >>${comparison}/${comparison}_RFcaller.log
+		rm ${comparison}/${comparison}_RFcaller_INDEL.log
+	fi
+
+	if [ "${resSNV}" -eq 0 ] && [ "${resINDEL}" -eq 0 ]; then
+		log "${comparison}" "." "Merging SNVs and INDELs"
+		log "${comparison}" "." "-- COMMAND: bcftools concat -a -o ${comparison}/mutations_${comparison}.vcf ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz"
+		bcftools concat -a ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+		log "${comparison}" "." "---- RESULT: $(bcftools view -H ${comparison}/mutations_${comparison}.vcf |wc -l |awk '{print $1}') mutations (SNVs+INDELs) have been detected in ${comparison}"
+	elif [ "${resSNV}" -eq 0 ]; then
+		log "${comparison}" "." "Exporting only SNVs because there are no INDELs"
+		bcftools view ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+	elif [ "${resINDEL}" -eq 0 ]; then
+		log "${comparison}" "." "Exporting only INDELs because there are no SNVs"
+		bcftools view ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+	else
+		log "${comparison}" "." "No mutations have been found for ${comparison}"
+	fi
+	
+	## Clean intermediate files
+	if [ "${clean}" = "True" ]; then
+		mv ${comparison}/mutations_${comparison}.vcf .
+		rm -rf ${comparison}
+		log "${comparison}" "." "Removing intermediate files"
+	fi
+	log "${comparison}" "." "***** Case ${comparison} has finished *****\n\n\n"
+}
+
+####### Pipeline
+## Parse arguments
+argparse $*
+
+## Change to work directory
+cd ${workDir}
+
+## Create a directory to save all results
+if [ ! -d ${outputDir} ]; then
+	mkdir ${outputDir}
+fi
+cd ${outputDir}
+
+## Send all the stderr to a file
+exec 2>${workDir}/${outputDir}/.stderr.log
+
+## Write to log
+echo -e "\n\n\n" >>${workDir}/${outputDir}/RFcaller.log
+log "general" "." "############   Starting RFcaller pipeline   ############\n"
+log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --assembly ${assembly} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} --clean ${clean}\n"
+
+### Read input file
+for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
+	normal=$(echo ${line} |awk -F ";" '{print $1}')
+	normal_bam=$(echo ${line} |awk -F ";" '{print $2}')
+	tumor=$(echo ${line} |awk -F ";" '{print $3}')
+	tumor_bam=$(echo ${line} |awk -F ";" '{print $4}')
+	comparison=$(echo ${line} |awk -F ";" '{print $5}')
+	ref_vcf=$(echo ${line} |awk -F ";" '{print $6}')
+
+	if [ "${normal}" = "" ]; then
+		continue
+	else
+		normal_bam=/${bamsDir}/${normal_bam}
+		tumor_bam=/${bamsDir}/${tumor_bam}
+		## Check if input BAMs exist
+		exist ${normal_bam} ${tumor_bam}
+		# If any of the files above don't exist, skip the current case
+		if [ "$?" -eq 0 ]; then
+			log "general" "." "ERROR: Skipping case ${comparison}. Check BAMs paths!\n"
+			continue
+		else
+			# Check if BAMs are indexed
+			if [ "${normal_bam##*.}" == "bam" ]; then
+				normal_index=${normal_bam}.bai
+			elif [ "${normal_bam##*.}" == "cram" ]; then
+				normal_index=${normal_bam}.crai
+			fi
+			if [ "${tumor_bam##*.}" == "bam" ]; then
+				tumor_index=${tumor_bam}.bai
+			elif [ "${tumor_bam##*.}" == "cram" ]; then
+				tumor_index=${tumor_bam}.crai
+			fi
+			exist ${normal_index} ${tumor_index}
+			# If any of indexes don't exist, skip the current case
+			if [ "$?" -eq 0 ]; then
+				log "general" "." "ERROR: Skipping case ${comparison}. BAMs must be indexed!\n"
+				continue
+			else
+				## Create a new directory for calling
+				if [ -d "${comparison}" ]; then
+					rm -rf ${comparison}
+				fi
+				mkdir -p ${comparison}/calling 
+				log "${comparison}" "." "***** Starting case ${comparison} in ${workDir}/${comparison} *****"
+			fi
+		fi
+
+		### VCF or ZERO pipeline
+		if [ "${#ref_vcf}" -eq 0 ]; then
+			## If there isn't anything, start the pipeline from the beginning
+			pipeline='ZERO'
+		elif [ -f ${ref_vcf} ]; then
+			## If the VCF exists, use it
+			pipeline='VCF'
+		else
+			## If the VCF doesn't exist, run the pipeline from the beginning
+			log "${comparison}" "." "WARNING: The VCF/BED for case ${comparison} doesn't exist"
+			pipeline='ZERO'
+		fi
+		log "${comparison}" "." "** ${comparison} is going to be analyzed using ${pipeline} pipeline **"
+
+		## Check whether the sample is a male or a female
+		detect_sex
+
+		#### First step: Get the VCF with mutations to analyze
+		### ZERO PIPLINE
+		if [ "${pipeline}" = "ZERO" ]; then
+			log "${comparison}" "." "Getting the VCF with mutations to analyze"
+
+			## Extract the BCF for normal and tumor at the same time for each chromosome
+			# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
+			mkdir ${comparison}/calling/tmp
+			merge_files=''
+			process_id_calling=''
+			# Bcftools call
+			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
+			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${assembly}"
+			# Check that the correct reference genome is used 
+			awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai)" = "False" ];then
+				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
+				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+				rm -rf ${comparison}
+				continue
+			fi
+			# Extract regions for multithreading
+			vcfutils.pl splitchr -l 50000000 ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+			for i in $(cat ${comparison}/calling/tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.fai; done > ${comparison}/calling/tmp/bcf_split.coords
+			# Call
+			for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
+				if [[ "${i}" != *"Y"*  ]]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${assembly} &
+					process_id_calling="${process_id_calling} $!"
+				else
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					process_id_calling="${process_id_calling} $!"
+				fi
+				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+				# Control the number of threads
+				multithreads ${threads} -
+			done
+			wait ${process_id_calling}
+
+			## Merge all the BCFs in a single VCF file
+			log "${comparison}" "." "-- Merging BCFs"
+			# Check that all the tmp files exist
+			merge_files2=''
+			for merge_file in ${merge_files}; do
+				if [ ! -f ${merge_file} ]; then
+					log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
+				else
+					merge_files2="${merge_files2} ${merge_file}"
+					continue
+				fi
+			done
+			log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${comparison}/calling/tmp/*.bcf"
+			bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${merge_files2}
+			log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
+
+			## Remove the temporal directory
+			rm -rf ${comparison}/calling/tmp
+
+		### VCF PIPELINE
+		elif [ "${pipeline}" = "VCF" ]; then
+			## Copy the VCF with a specific name and extract positions
+			if [ "${positions}" = "VCF" ]; then
+				log "${comparison}" "." "Copying the VCF to the new directory"
+				cp ${ref_vcf} ${comparison}/calling/input.vcf
+				bcftools view -H ${comparison}/calling/input.vcf | awk '{print $1"\t"$2}' >${comparison}/calling/input.pos
+			elif [ "${positions}" = "BED" ]; then
+				log "${comparison}" "." "Copying the BED to the new directory"
+				awk '{print $1"\t"$2}' ${ref_vcf} > ${comparison}/calling/input.pos
+			fi
+			
+			## Extract the BCF for normal and tumor at the same time for each chromosome
+			# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
+			mkdir ${comparison}/calling/tmp
+			merge_files=''
+			process_id_calling=''
+			# Bcftools call
+			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
+			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${assembly}"
+			# Check that the correct reference genome is used 
+			awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+			awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
+			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
+				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
+				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+				rm -rf ${comparison}
+				continue
+			fi
+			# Extract chromosomes for multithreading
+			awk '{print $1}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+			for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp.fai ${comparison}/calling/tmp/.tmp.pos); do
+				# Extract positions for the actual chromosome
+				grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
+				if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
+					if [ "${i}" != "Y"  ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${assembly} &
+						process_id_calling="${process_id_calling} $!"
+					else
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+						process_id_calling="${process_id_calling} $!"
+					fi
+					merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+					# Control the number of threads
+					multithreads ${threads} -
+				else
+					continue
+				fi
+			done
+			wait ${process_id_calling}
+			
+			## Merge all the BCFs in a single VCF file
+			log "${comparison}" "." "-- Merging BCFs"
+			# Check that all the tmp files exist
+			merge_files2=''
+			for merge_file in ${merge_files}; do
+				if [ ! -f ${merge_file} ]; then
+					log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
+				else
+					merge_files2="${merge_files2} ${merge_file}"
+					continue
+				fi
+			done
+			log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O u ${comparison}/calling/tmp/*.bcf |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -"
+			bcftools concat --threads ${threads} -O u ${merge_files2} |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -
+			log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
+
+			## Remove the temporal directory
+			rm -rf ${comparison}/calling/tmp
+		fi
+
+		## Skip the case if no mutations were detected after the calling
+		if [ "$(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l |awk '{print $1}')" -eq 0 ]; then
+			log "${comparison}" "." "WARNING: There are no mutations to analyze... removing the directory"
+			cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+			rm -rf ${comparison}
+			continue
+		fi
+
+		## Launch refinement function
+		refinement ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} &
+		
+	fi 
+done
+wait
+
+## Merge log
+cat ${input} | while read -r normal normal_bam tumor tumor_bam comparison ref_vcf; do
+	if [ -d ${comparison} ]; then
+		cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+		rm ${comparison}/${comparison}_RFcaller.log
+	else
+		continue
+	fi
+done
