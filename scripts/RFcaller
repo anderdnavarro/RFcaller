@@ -76,7 +76,7 @@ Options:
   --ND_window		INT	Window size around a position to look for mutations in normal (INDELs) [${ND_window}]
   --SNV_threshold	FLOAT	Minimum regression value to consider a SNV as good [${SNV_threshold}]
   --INDEL_threshold	FLOAT	Minimum regression value to consider an INDEL as good [${INDEL_threshold}]
-  --polyINDEL_threshold	FLOAT	Minimum regression value to consider a polyINDEL as good [${polyINDEL_threshold}]
+  --polyINDEL_threshold	FLOAT	Minimum regression value to consider an homopolymerINDEL as good [${polyINDEL_threshold}]
   --clean		BOOLEAN	Remove all intermediate files (choices: True/False) [${clean}]
   -h, --help			Show this help and exit
 "

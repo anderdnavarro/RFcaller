@@ -223,7 +223,7 @@ Minimum QUAL value to consider an INDEL as good.
 
 *Default: 0.7723*
 
-Minimum QUAL value to consider a polyINDEL as good.
+Minimum QUAL value to consider an homopolymerINDEL as good.
 
 ###### --clean
 
@@ -376,7 +376,7 @@ Options:
   --ND_window           INT     Window size around a position to look for mutations in normal (INDELs) [10]
   --SNV_threshold       FLOAT   Minimum regression value to consider a SNV as good [10.726]
   --INDEL_threshold     FLOAT   Minimum regression value to consider an INDEL as good [32.1418]
-  --polyINDEL_threshold FLOAT   Minimum regression value to consider a polyINDEL as good [0.7723]
+  --polyINDEL_threshold FLOAT   Minimum regression value to consider an homopolymerINDEL as good [0.7723]
   --clean               BOOLEAN Remove all intermediate files (choices: True/False) [False]
   -h, --help                    Show this help and exit
 ```
@@ -392,7 +392,7 @@ For each case, three directories and a final file will be created:
 	- `${name}.norm.vcf.gz` -> After normalizing the indels
 	- `${name}.filter.norm.vcf.gz` -> After removing SNPs
 	- `${name}.SNVs.filter.norm.vcf` and `${name}.INDELs.filter.norm.vcf` -> Separate SNVs and INDELs into two files
-	- `polyIndel.pos` -> BED file with those positions which contain an INDEL of the class TAAAA -> TAAA
+	- `polyIndel.pos` -> BED file with those positions which contain an homopolymer INDEL
 2. somaticSNV: RFcaller results for SNVs
 	- `reduced.positions` -> All positions to analyze in `${name}.SNVs.filter.norm.vcf`
 	- `reduced_*.bam` -> A small bam with just the reads overlapping positions in `reduced.positions` 
