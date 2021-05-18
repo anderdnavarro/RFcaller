@@ -395,8 +395,12 @@ extract_BAM_stats(){
 	## Wait until mapq is finished
 	wait ${process_id_mapq}
 	if [ ${pipeline} = 'INDEL' ]; then
-		cat ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq | sort -k1,1V -k2,2n > ${comparison}/somaticINDEL/${name}.mapq
-		rm ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq
+		cat ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq > ${comparison}/somaticINDEL/tmp.mapq
+		cat ${comparison}/somaticINDEL/tmp.mapq |grep -v -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' |sort -k1,1n -k2,2n > ${comparison}/somaticINDEL/${name}.mapq
+		for z in X Y MT GL000 hs37d5; do
+			cat ${comparison}/somaticINDEL/tmp.mapq |grep "^${z}" |sort -k1,1 -k2,2n >> ${comparison}/somaticINDEL/${name}.mapq
+		done
+		rm ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq ${comparison}/somaticINDEL/tmp.mapq
 	fi
 }
 
