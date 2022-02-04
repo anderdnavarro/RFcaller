@@ -20,7 +20,8 @@ threads=24
 assembly='GRCh37'
 positions='VCF'
 contamination=0.05
-clean='False'
+includePatches='False'
+keep='False'
 
 ## Databases
 genome='/home/databases/hg19/hs37d5.fa.gz'
@@ -77,7 +78,8 @@ Options:
   --SNV_threshold	FLOAT	Minimum regression value to consider a SNV as good [${SNV_threshold}]
   --INDEL_threshold	FLOAT	Minimum regression value to consider an INDEL as good [${INDEL_threshold}]
   --polyINDEL_threshold	FLOAT	Minimum regression value to consider an homopolymerINDEL as good [${polyINDEL_threshold}]
-  --clean		BOOLEAN	Remove all intermediate files (choices: True/False) [${clean}]
+  --includePatches	TAG	Analyze both canonical chromosomes and patches
+  --keep		TAG	Keep intermediate files
   -h, --help			Show this help and exit
 "
 	exit 0
@@ -91,7 +93,11 @@ argparse(){
 
 	while [ "$#" -ne 0 ]; do
 		PARAM=$(echo -e $1 | awk -F= '{print $1}')
-		VALUE=$(echo -e $2 | awk -F= '{print $1}')
+		if [ "${PARAM}" != "--keep" ] && [ "${PARAM}" != "--includePatches" ]; then
+			VALUE=$(echo -e $2 | awk -F= '{print $1}')
+		else
+			VALUE=''
+		fi
 		case ${PARAM} in
 			-@)
 			threads=${VALUE}
@@ -192,13 +198,11 @@ argparse(){
 			--polyINDEL_threshold)
 			polyINDEL_threshold=${VALUE}
 			;;
-			--clean)
-			if [ "${VALUE}" = "True" ]; then
-				clean='True'
-			elif [ "${VALUE}" != "False" ] && [ "${VALUE}" != "True" ]; then
-				echo -e "ERROR: Clean option must be True or False\n"
-				help
-			fi
+			--includePatches)
+			includePatches='True'
+			;;
+			--keep)
+			keep='True'
 			;;
 			-h | --help)
 			help
@@ -209,7 +213,9 @@ argparse(){
 			;;
 		esac
 		shift
-		shift
+		if [ "${PARAM}" != "--keep" ] && [ "${PARAM}" != "--includePatches" ]; then
+			shift
+		fi
 	done
 }
 
@@ -777,8 +783,8 @@ refinement() {
 		log "${comparison}" "." "No mutations have been found for ${comparison}"
 	fi
 	
-	## Clean intermediate files
-	if [ "${clean}" = "True" ]; then
+	## Keep intermediate files
+	if [ "${keep}" = "False" ]; then
 		mv ${comparison}/mutations_${comparison}.vcf .
 		rm -rf ${comparison}
 		log "${comparison}" "." "Removing intermediate files"
@@ -805,7 +811,14 @@ exec 2>${workDir}/${outputDir}/.stderr.log
 ## Write to log
 echo -e "\n\n\n" >>${workDir}/${outputDir}/RFcaller.log
 log "general" "." "############   Starting RFcaller pipeline   ############\n"
-log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --assembly ${assembly} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} --clean ${clean}\n"
+tags=''
+if [ "${keep}" = "True" ]; then
+	tags="${tags} --keep"
+fi
+if [ "${includePatches}" = "True" ]; then
+	tags="${tags} --includePatches"
+fi
+log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --assembly ${assembly} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} ${tags}\n"
 
 ### Read input file
 for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
@@ -885,9 +898,15 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
 			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${assembly}"
 			# Check that the correct reference genome is used 
-			awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
-			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+			if [ "${includePatches}" = "True" ]; then
+				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+			else
+				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.len.bai
+			fi
 			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai)" = "False" ];then
 				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
 				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
@@ -895,8 +914,8 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 				continue
 			fi
 			# Extract regions for multithreading
-			vcfutils.pl splitchr -l 50000000 ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-			for i in $(cat ${comparison}/calling/tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.fai; done > ${comparison}/calling/tmp/bcf_split.coords
+			vcfutils.pl splitchr -l 50000000 ${comparison}/calling/tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
+			for i in $(cat ${comparison}/calling/tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
 			# Call
 			for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
 				if [[ "${i}" != *"Y"*  ]]; then
@@ -952,10 +971,17 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
 			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${assembly}"
 			# Check that the correct reference genome is used 
-			awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
-			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
-			awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
+			if [ "${includePatches}" = "True" ]; then
+				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
+			else
+				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.pos
+			fi
 			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
 				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
 				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
@@ -963,8 +989,8 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 				continue
 			fi
 			# Extract chromosomes for multithreading
-			awk '{print $1}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-			for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp.fai ${comparison}/calling/tmp/.tmp.pos); do
+			awk '{print $1}' ${comparison}/calling/tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp2fai
+			for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp2.fai ${comparison}/calling/tmp/.tmp.pos); do
 				# Extract positions for the actual chromosome
 				grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
 				if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
