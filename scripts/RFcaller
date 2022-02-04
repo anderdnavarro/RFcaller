@@ -15,6 +15,7 @@ set -u
 ## Required files
 input=''
 genome=''
+dbSNP=''
 
 ## General
 workDir=$(pwd)
@@ -26,9 +27,6 @@ positions='VCF'
 contamination=0.05
 includePatches='False'
 keep='False'
-
-## Databases
-dbSNP='/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz'
 
 ## Pileup thresholds
 # SNV
@@ -65,7 +63,7 @@ Options:
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
   -g, --genome		FILE	Reference genome in FASTA format
-  -p, --dbSNP		FILE	VCF with common SNPs [${dbSNP}]
+  -p, --dbSNP		FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
   --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
   --assembly		STR	BCFTOOLS tag for ploidy to use in variant calling (choices: GRCh37/GRCh38) [${assembly}]
@@ -144,11 +142,24 @@ argparse(){
 			fi
 			;;
 			-p | --dbSNP)
-			if [ ! -f ${VALUE} ]; then
+			if [ "${VALUE}" = "hg19" ]; then
+				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz"
+			elif [ "${VALUE}" = "hg38" ]; then
+				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg38_combined.vcf.gz"
+			elif [ ! -f ${VALUE} ]; then
 				echo -e "ERROR: The dbSNP provided does not exist\n"
 				help
 			else
 				dbSNP=$(realpath ${VALUE})
+				if [ ! -f ${dbSNP}.tbi ]; then
+					if [ "${dbSNP##*.}" = "gz" ]; then
+						gunzip ${dbSNP}
+						dbSNP=${dbSNP%.gz}
+					fi
+					bcftools sort -O z -o ${dbSNP}.gz -T . ${dbSNP}
+					dbSNP=${VALUE}.gz
+					tabix --force ${dbSNP}
+				fi
 			fi
 			;;
 			--positions)
@@ -227,6 +238,9 @@ argparse(){
 		help
 	elif [ "${genome}" = "" ]; then
 		echo -e "ERROR: You must provide a genome"
+		help
+	elif [ "${dbSNP}" = "" ]; then
+		echo -e "ERROR: For dbSNP argument you must choose between: hg19, hg38 or provide your own dbSNP file"
 		help
 	fi
 }
