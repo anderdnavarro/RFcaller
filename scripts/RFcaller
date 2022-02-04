@@ -154,11 +154,10 @@ argparse(){
 				if [ ! -f ${dbSNP}.tbi ]; then
 					if [ "${dbSNP##*.}" = "gz" ]; then
 						gunzip ${dbSNP}
-						dbSNP=${dbSNP%.gz}
 					fi
-					bcftools sort -O z -o ${dbSNP}.gz -T . ${dbSNP}
-					dbSNP=${VALUE}.gz
+					bcftools sort -O z -o ${dbSNP} -T . ${dbSNP%.gz}
 					tabix --force ${dbSNP}
+					rm ${dbSNP%.gz}
 				fi
 			fi
 			;;
