@@ -12,11 +12,15 @@ set -u
 ###########################################################################
 
 #### Load defaults
+## Required files
+input=''
+genome=''
+
 ## General
 workDir=$(pwd)
 outputDir='.'
 bamsDir='/bams'
-threads=24
+threads=20
 assembly='GRCh37'
 positions='VCF'
 contamination=0.05
@@ -24,7 +28,6 @@ includePatches='False'
 keep='False'
 
 ## Databases
-genome='/home/databases/hg19/hs37d5.fa.gz'
 dbSNP='/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz'
 
 ## Pileup thresholds
@@ -44,8 +47,8 @@ ND_mut_INDEL=2
 ND_window=10
 
 ## Machine learning
-SNV_algorithm=$(dirname $0)'/regression_SNVs_algorithm_v3.4.pkl'
-INDEL_algorithm=$(dirname $0)'/regression_INDELs_algorithm_v4.3.pkl'
+SNV_algorithm='/home/RFcaller/scripts/regression_SNVs_algorithm_v3.4.pkl'
+INDEL_algorithm='/home/RFcaller/scripts/regression_INDELs_algorithm_v4.3.pkl'
 
 #### Functions
 ## Help function
@@ -61,7 +64,7 @@ Options:
   -w, --workDir		DIR	Directory where run the pipeline [${workDir}]
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
-  -g, --genome		FILE	Reference genome in FASTA format [${genome}]
+  -g, --genome		FILE	Reference genome in FASTA format
   -p, --dbSNP		FILE	VCF with common SNPs [${dbSNP}]
   --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
@@ -217,6 +220,15 @@ argparse(){
 			shift
 		fi
 	done
+
+	# Check if the required arguments exist
+	if [ "${input}" = "" ]; then
+		echo -e "ERROR: You must provide an input"
+		help
+	elif [ "${genome}" = "" ]; then
+		echo -e "ERROR: You must provide a genome"
+		help
+	fi
 }
 
 ## Write a log file
