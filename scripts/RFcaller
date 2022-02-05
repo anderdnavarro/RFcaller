@@ -16,13 +16,13 @@ set -u
 input=''
 genome=''
 dbSNP=''
+ploidy_file=''
 
 ## General
 workDir=$(pwd)
 outputDir='.'
 bamsDir='/bams'
 threads=20
-assembly='GRCh37'
 positions='VCF'
 contamination=0.05
 includePatches='False'
@@ -58,15 +58,15 @@ Options:
   -i, --input		FILE	TSV FILE with the cases to analyze
 				It must contain the following columns:
 				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
+  -g, --genome		FILE	Reference genome in FASTA format
+  -p, --dbSNP		FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
   -@			INT	Number of threads to use [${threads}]
   -w, --workDir		DIR	Directory where run the pipeline [${workDir}]
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
-  -g, --genome		FILE	Reference genome in FASTA format
-  -p, --dbSNP		FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
   --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
-  --assembly		STR	BCFTOOLS tag for ploidy to use in variant calling (choices: GRCh37/GRCh38) [${assembly}]
+  --ploidy_file		FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
   --TD_cov_SNV		INT	Minimum coverage for tumor (SNVs) [${TD_cov_SNV}]
   --TD_cov_INDEL	INT	Minimum coverage for tumor (INDELs) [${TD_cov_INDEL}]
   --ND_cov_SNV		INT	Minimum coverage for normal (SNVs) [${ND_cov_SNV}]
@@ -150,16 +150,25 @@ argparse(){
 			-p | --dbSNP)
 			if [ "${VALUE}" = "hg19" ]; then
 				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz"
+				dbSNPtag="hg19"
+				if [ "${ploidy_file}" = "" ]; then
+					ploidy_file="GRCh37"
+				fi
 			elif [ "${VALUE}" = "hg38" ]; then
 				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg38_combined.vcf.gz"
+				dbSNPtag="hg38"
+				if [ "${ploidy_file}" = "" ]; then
+					ploidy_file="GRCh38"
+				fi
 			elif [ ! -f ${VALUE} ]; then
 				echo -e "ERROR: The dbSNP provided does not exist\n"
 				help
-			elif [ "${VALUE##*.}" != "vcf" ] && [ "${VALUE##*.}" != "VCF" ]; then
+			elif [ "${VALUE##*.}" != "vcf" ] && [ "${VALUE##*.}" != "VCF" ] && [ "${VALUE##*vcf.}" != "gz" ] && [ "${VALUE##*VCF.}" != "GZ" ]; then
 				echo -e "ERROR: dbSNP file must be a VCF\n"
 				help
 			else
 				dbSNP=$(realpath ${VALUE})
+				dbSNPtag="Other"
 				if [ ! -f ${dbSNP}.tbi ]; then
 					bn=$(basename ${dbSNP})
 					if [ "${bn##*.}" = "gz" ]; then
@@ -186,8 +195,27 @@ argparse(){
 			--contamination)
 			contamination=${VALUE}
 			;;
-			--assembly)
-			assembly=${VALUE}
+			--ploidy_file)
+			if  [ "${VALUE}" = "?" ]; then
+				echo -e "
+	By default if the user specifies dbSNP=hg19 or dbSNP=hg38, --ploidy file is GRCh37 or GRCh38 respectively.
+	Otherwise, you must can select between the following options: 
+		- Predefined options: GRCh37, GRCh38, GRCm38 (mouse), GRCm39 (mouse)
+		- None (consider all sites as diploid)
+		- Provide your own ploidy file following this template
+	"
+				sleep 0.5
+				echo -e "
+	$(bcftools call --ploidy ?)"
+				exit 0
+			elif [ "${VALUE}" = "GRCh37" ] || [ "${VALUE}" = "GRCh38" ] || [ "${VALUE}" = "GRCm38" ] || [ "${VALUE}" = "GRCm39" ] || [ "${VALUE}" = "None" ]; then
+				ploidy_file=${VALUE}
+			elif [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The ploidy_file provided does not exist\n"
+				help
+			else
+				ploidy_file=${VALUE}
+			fi
 			;;
 			--TD_cov_SNV)
 			TD_cov_SNV=${VALUE}
@@ -255,7 +283,18 @@ argparse(){
 	elif [ "${dbSNP}" = "" ]; then
 		echo -e "ERROR: For dbSNP argument you must choose between: hg19, hg38 or provide your own dbSNP file\n"
 		help
+	elif [ "${ploidy_file}" = "" ]; then
+		echo -e "ERROR: If you are using your own dbSNP, you must choose between: GRCh37, GRCh38, GRCm38, GRCm39 or provide your own ploidy_file\n"
+		help
 	fi
+
+	# Search for incompatibilities between versions
+	echo -e "${dbSNP} ${ploidy_file}"
+	if ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCh38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCh37" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm39" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm39" ]); then
+		echo -e "ERROR: dbSNP and ploidy_file fields must correspond to the same genome version\n"
+		help
+	fi
+	exit 0
 }
 
 ## Write a log file
@@ -297,10 +336,14 @@ detect_sex(){
 	sum_depth=0
 	n=0
 	## Check the coverage at SRY gene
-	if [ "${assembly}" = "GRCh37" ]; then
+	if [ "${ploidy_file}" = "GRCh37" ]; then
 		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2654896-2655740 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
-	elif [ "${assembly}" = "GRCh38" ]; then
+	elif [ "${ploidy_file}" = "GRCh38" ]; then
 		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2786855-2787682 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+	elif [ "${ploidy_file}" = "GRCm38" ] || [ "${ploidy_file}" = "GRCm39" ]; then
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2663293-2663952 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+	else
+		SRYcov=0
 	fi
 	
 	## If there are ≥ 5 reads it's a male
@@ -857,7 +900,7 @@ fi
 if [ "${includePatches}" = "True" ]; then
 	tags="${tags} --includePatches"
 fi
-log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --assembly ${assembly} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} ${tags}\n"
+log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --ploidy_file ${ploidy_file} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} ${tags}\n"
 
 ### Read input file
 for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
@@ -935,7 +978,7 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			process_id_calling=''
 			# Bcftools call
 			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
-			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${assembly}"
+			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${ploidy_file}"
 			# Check that the correct reference genome is used 
 			if [ "${includePatches}" = "True" ]; then
 				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
@@ -957,16 +1000,31 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			for i in $(cat ${comparison}/calling/tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
 			# Call
 			for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
-				if [[ "${i}" != *"Y"*  ]]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${assembly} &
-					process_id_calling="${process_id_calling} $!"
-				else
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-					process_id_calling="${process_id_calling} $!"
+				if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
+						if [[ "${i}" != *"Y"*  ]]; then
+							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
+							process_id_calling="${process_id_calling} $!"
+						else
+							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+							process_id_calling="${process_id_calling} $!"
+						fi
+					elif [ "${ploidy_file}" = "GRCm38" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+						process_id_calling="${process_id_calling} $!"
+					elif [ "${ploidy_file}" = "GRCm39" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+						process_id_calling="${process_id_calling} $!"
+					elif [ "${ploidy_file}" = "None" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+						process_id_calling="${process_id_calling} $!"
+					else
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+						process_id_calling="${process_id_calling} $!"
+					fi
+					merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+					# Control the number of threads
+					multithreads ${threads} -
 				fi
-				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
-				# Control the number of threads
-				multithreads ${threads} -
 			done
 			wait ${process_id_calling}
 
@@ -1008,7 +1066,7 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			process_id_calling=''
 			# Bcftools call
 			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
-			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${assembly}"
+			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${ploidy_file}"
 			# Check that the correct reference genome is used 
 			if [ "${includePatches}" = "True" ]; then
 				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
@@ -1033,11 +1091,25 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 				# Extract positions for the actual chromosome
 				grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
 				if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
-					if [ "${i}" != "Y"  ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${assembly} &
+					if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
+						if [ "${i}" != "Y"  ]; then
+							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
+							process_id_calling="${process_id_calling} $!"
+						else
+							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+							process_id_calling="${process_id_calling} $!"
+						fi
+					elif [ "${ploidy_file}" = "GRCm38" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+						process_id_calling="${process_id_calling} $!"
+					elif [ "${ploidy_file}" = "GRCm39" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+						process_id_calling="${process_id_calling} $!"
+					elif [ "${ploidy_file}" = "None" ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
 						process_id_calling="${process_id_calling} $!"
 					else
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
 						process_id_calling="${process_id_calling} $!"
 					fi
 					merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
