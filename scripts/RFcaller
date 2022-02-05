@@ -134,11 +134,17 @@ argparse(){
 			if [ ! -f ${VALUE} ]; then
 				echo -e "ERROR: The genome provided does not exist\n"
 				help
-			elif [ ! -f ${VALUE}.fai ]; then
-				echo -e "ERROR: The genome must be indexed\n"
-				help
-			else
-				genome=$(realpath ${VALUE})
+			fi
+			genome=$(realpath ${VALUE})
+			if [ "${genome##*.}" = "gz" ]; then
+				if [ ! -f ${genome}.fai ] && [ ! -f ${genome}.gzi ]; then
+					bn=$(basename ${genome})
+					gunzip -c ${genome} > /tmp/${bn%.gz}
+					genome="/tmp/${bn%.gz}"
+					samtools faidx ${genome}
+				fi
+			elif [ ! -f ${genome}.fai ]; then
+				samtools faidx ${genome}
 			fi
 			;;
 			-p | --dbSNP)
@@ -149,15 +155,23 @@ argparse(){
 			elif [ ! -f ${VALUE} ]; then
 				echo -e "ERROR: The dbSNP provided does not exist\n"
 				help
+			elif [ "${VALUE##*.}" != "vcf" ] && [ "${VALUE##*.}" != "VCF" ]; then
+				echo -e "ERROR: dbSNP file must be a VCF\n"
+				help
 			else
 				dbSNP=$(realpath ${VALUE})
 				if [ ! -f ${dbSNP}.tbi ]; then
-					if [ "${dbSNP##*.}" = "gz" ]; then
-						gunzip ${dbSNP}
+					bn=$(basename ${dbSNP})
+					if [ "${bn##*.}" = "gz" ]; then
+						gunzip -c ${dbSNP} > /tmp/${bn%.gz}
+						bcftools sort -O z -o /tmp/${bn} -T . /tmp/${bn%.gz}bc 2> /dev/null
+						dbSNP="/tmp/${bn}"
+					else
+						bcftools sort -O z -o /tmp/${bn}.gz -T . ${dbSNP} 2> /dev/null
+						tabix --force /tmp/${bn}.gz
+						dbSNP="/tmp/${bn}.gz"
 					fi
-					bcftools sort -O z -o ${dbSNP} -T . ${dbSNP%.gz}
 					tabix --force ${dbSNP}
-					rm ${dbSNP%.gz}
 				fi
 			fi
 			;;
@@ -165,7 +179,7 @@ argparse(){
 			if [ "${VALUE}" = "BED" ]; then
 				positions='BED'
 			elif [ "${VALUE}" != "VCF" ] && [ "${VALUE}" != "BED" ]; then
-				echo -e "ERROR: Positions argument must be a VCF or a BED file"
+				echo -e "ERROR: Positions argument must be a VCF or a BED file\n"
 				help
 			fi
 			;;
@@ -233,13 +247,13 @@ argparse(){
 
 	# Check if the required arguments exist
 	if [ "${input}" = "" ]; then
-		echo -e "ERROR: You must provide an input"
+		echo -e "ERROR: You must provide an input\n"
 		help
 	elif [ "${genome}" = "" ]; then
-		echo -e "ERROR: You must provide a genome"
+		echo -e "ERROR: You must provide a genome\n"
 		help
 	elif [ "${dbSNP}" = "" ]; then
-		echo -e "ERROR: For dbSNP argument you must choose between: hg19, hg38 or provide your own dbSNP file"
+		echo -e "ERROR: For dbSNP argument you must choose between: hg19, hg38 or provide your own dbSNP file\n"
 		help
 	fi
 }
