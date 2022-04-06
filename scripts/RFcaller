@@ -289,12 +289,16 @@ argparse(){
 	fi
 
 	# Search for incompatibilities between versions
-	echo -e "${dbSNP} ${ploidy_file}"
 	if ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCh38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCh37" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm39" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm39" ]); then
 		echo -e "ERROR: dbSNP and ploidy_file fields must correspond to the same genome version\n"
 		help
 	fi
-	exit 0
+
+	# Check if dbSNP is in the same format as the genome
+	if [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(bcftools view -H ${dbSNP} | head -n1 | grep "^chr" | wc -l)" ]; then
+		echo -e "ERROR: Reference genome and dbSNP are not in the same format\n"
+		exit 0
+	fi
 }
 
 ## Write a log file
@@ -335,13 +339,23 @@ exist(){
 detect_sex(){
 	sum_depth=0
 	n=0
+	if [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -eq 1 ]; then
+		hg19_Y_region="chrY:2654896-2655740"
+		hg38_Y_region="chrY:2786855-2787682"
+		mouse_Y_region="chrY:2663293-2663952"
+	else
+		hg19_Y_region="Y:2654896-2655740"
+		hg38_Y_region="Y:2786855-2787682"
+		mouse_Y_region="Y:2663293-2663952"
+	fi
+
 	## Check the coverage at SRY gene
 	if [ "${ploidy_file}" = "GRCh37" ]; then
-		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2654896-2655740 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r ${hg19_Y_region} ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
 	elif [ "${ploidy_file}" = "GRCh38" ]; then
-		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2786855-2787682 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r ${hg38_Y_region} ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
 	elif [ "${ploidy_file}" = "GRCm38" ] || [ "${ploidy_file}" = "GRCm39" ]; then
-		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r Y:2663293-2663952 ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
+		SRYcov=$(samtools depth -aa -Q 40 -q 20 --reference ${genome} -r ${mouse_Y_region} ${normal_bam} |{ while read -r chrom pos depth; do sum_depth=$((${sum_depth}+${depth})); n=$(($n+1)); done; mean_depth=$((${sum_depth}/$n)); echo -e ${mean_depth}; })
 	else
 		SRYcov=0
 	fi
@@ -484,9 +498,8 @@ extract_BAM_stats(){
 	wait ${process_id_mapq}
 	if [ ${pipeline} = 'INDEL' ]; then
 		cat ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq > ${comparison}/somaticINDEL/tmp.mapq
-		cat ${comparison}/somaticINDEL/tmp.mapq |grep -v -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' |sort -k1,1n -k2,2n > ${comparison}/somaticINDEL/${name}.mapq
-		for z in X Y MT GL000 hs37d5; do
-			cat ${comparison}/somaticINDEL/tmp.mapq |grep "^${z}" |sort -k1,1 -k2,2n >> ${comparison}/somaticINDEL/${name}.mapq
+		for z in $(cat /tmp/.tmp.bai); do
+			grep -w "^${z}" ${comparison}/somaticINDEL/tmp.mapq |sort -k2,2n >> ${comparison}/somaticINDEL/${name}.mapq
 		done
 		rm ${comparison}/somaticINDEL/${name}_short.mapq ${comparison}/somaticINDEL/${name}_long.mapq ${comparison}/somaticINDEL/tmp.mapq
 	fi
@@ -673,9 +686,8 @@ somaticINDEL(){
 		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup
 	done
 	# Filter the mini pileup
-	cat ${merge_files} |grep -v -e '^#' -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' |sort -k1,1n -k2,2n > ${comparison}/somaticINDEL/tmp/tmp.merge
-	for z in X Y MT GL000 hs37d5; do
-		cat ${merge_files} |grep "^${z}" |sort -k1,1 -k2,2n >> ${comparison}/somaticINDEL/tmp/tmp.merge
+	for z in $(cat /tmp/.tmp.bai); do
+		cat ${merge_files} |grep -w "^${z}" |sort -k2,2n >> ${comparison}/somaticINDEL/tmp/tmp.merge
 	done
 	filterMPindels.py -i ${comparison}/somaticINDEL/tmp/tmp.merge -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf
 	log "${comparison}" "_INDEL." "------ RESULT: $(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}') INDELs remaining"
@@ -806,9 +818,8 @@ refinement() {
 
 	## Sort Indel vcf
 	grep '^#' ${comparison}/calling/.indel.tmp > ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
-	grep -v -e '^#' -e '^X' -e '^Y' -e '^MT' -e '^GL000' -e 'hs37d5' ${comparison}/calling/.indel.tmp |sort -k1,1n -k2,2n >> ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
-	for z in X Y MT GL000 hs37d5; do
-		grep "^${z}" ${comparison}/calling/.indel.tmp |sort -k1,1 -k2,2n >> ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
+	for z in $(cat /tmp/.tmp.bai); do
+		grep -w "^${z}" ${comparison}/calling/.indel.tmp |sort -k2,2n >> ${comparison}/calling/${comparison}.INDELs.filter.norm.vcf
 	done
 
 	###### Run the somaticSNV pipeline
@@ -981,50 +992,49 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${ploidy_file}"
 			# Check that the correct reference genome is used 
 			if [ "${includePatches}" = "True" ]; then
-				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
 			else
-				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
 			fi
-			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai)" = "False" ];then
+			if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai)" = "False" ];then
 				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
 				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
 				rm -rf ${comparison}
 				continue
 			fi
 			# Extract regions for multithreading
-			vcfutils.pl splitchr -l 50000000 ${comparison}/calling/tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
-			for i in $(cat ${comparison}/calling/tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
+			vcfutils.pl splitchr -l 50000000 /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
+			for i in $(cat /tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
 			# Call
 			for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
 				if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
-						if [[ "${i}" != *"Y"*  ]]; then
-							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
-							process_id_calling="${process_id_calling} $!"
-						else
-							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-							process_id_calling="${process_id_calling} $!"
-						fi
-					elif [ "${ploidy_file}" = "GRCm38" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
-						process_id_calling="${process_id_calling} $!"
-					elif [ "${ploidy_file}" = "GRCm39" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
-						process_id_calling="${process_id_calling} $!"
-					elif [ "${ploidy_file}" = "None" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					if [[ "${i}" != *"Y"*  ]]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
 						process_id_calling="${process_id_calling} $!"
 					else
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
 						process_id_calling="${process_id_calling} $!"
 					fi
-					merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
-					# Control the number of threads
-					multithreads ${threads} -
+				elif [ "${ploidy_file}" = "GRCm38" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+					process_id_calling="${process_id_calling} $!"
+				elif [ "${ploidy_file}" = "GRCm39" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+					process_id_calling="${process_id_calling} $!"
+				elif [ "${ploidy_file}" = "None" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					process_id_calling="${process_id_calling} $!"
+				else
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+					process_id_calling="${process_id_calling} $!"
 				fi
+				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+				# Control the number of threads
+				multithreads ${threads} -
 			done
 			wait ${process_id_calling}
 
@@ -1052,8 +1062,8 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			## Copy the VCF with a specific name and extract positions
 			if [ "${positions}" = "VCF" ]; then
 				log "${comparison}" "." "Copying the VCF to the new directory"
-				cp ${ref_vcf} ${comparison}/calling/input.vcf
-				bcftools view -H ${comparison}/calling/input.vcf | awk '{print $1"\t"$2}' >${comparison}/calling/input.pos
+				bcftools view -O z ${ref_vcf} -o ${comparison}/calling/input.vcf.gz
+				bcftools view -H ${comparison}/calling/input.vcf.gz | awk '{print $1"\t"$2}' >${comparison}/calling/input.pos
 			elif [ "${positions}" = "BED" ]; then
 				log "${comparison}" "." "Copying the BED to the new directory"
 				awk '{print $1"\t"$2}' ${ref_vcf} > ${comparison}/calling/input.pos
@@ -1069,24 +1079,24 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${ploidy_file}"
 			# Check that the correct reference genome is used 
 			if [ "${includePatches}" = "True" ]; then
-				awk '{print $1"\t"$2}' ${genome}.fai > ${comparison}/calling/tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > ${comparison}/calling/tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
 				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
 			else
-				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.len.bai
+				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
+				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
+				samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
 				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.pos
 			fi
-			if [ "$(checkChr.py -f ${comparison}/calling/tmp/.tmp.fai -b ${comparison}/calling/tmp/.tmp.bai -l ${comparison}/calling/tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
+			if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
 				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
 				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
 				rm -rf ${comparison}
 				continue
 			fi
 			# Extract chromosomes for multithreading
-			awk '{print $1}' ${comparison}/calling/tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp2fai
+			awk '{print $1}' /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp2.fai
 			for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp2.fai ${comparison}/calling/tmp/.tmp.pos); do
 				# Extract positions for the actual chromosome
 				grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
