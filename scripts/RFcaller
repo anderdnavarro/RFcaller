@@ -55,12 +55,12 @@ help(){
 Usage: RFcaller [options]"
 	echo -e "
 Options:
+  -@			INT	Number of threads to use [${threads}]
   -i, --input		FILE	TSV FILE with the cases to analyze
 				It must contain the following columns:
 				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
   -g, --genome		FILE	Reference genome in FASTA format
   -p, --dbSNP		FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
-  -@			INT	Number of threads to use [${threads}]
   -w, --workDir		DIR	Directory where run the pipeline [${workDir}]
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
@@ -198,8 +198,8 @@ argparse(){
 			--ploidy_file)
 			if  [ "${VALUE}" = "?" ]; then
 				echo -e "
-	By default if the user specifies dbSNP=hg19 or dbSNP=hg38, --ploidy file is GRCh37 or GRCh38 respectively.
-	Otherwise, you must can select between the following options: 
+	By default if the user specifies dbSNP=hg19 or dbSNP=hg38, --ploidy_file is GRCh37 or GRCh38 respectively.
+	Otherwise, you must select between the following options: 
 		- Predefined options: GRCh37, GRCh38, GRCm38 (mouse), GRCm39 (mouse)
 		- None (consider all sites as diploid)
 		- Provide your own ploidy file following this template
