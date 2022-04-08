@@ -65,8 +65,8 @@ Options:
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
   --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
+  --ploidy_file		STR/FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
-  --ploidy_file		FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
   --TD_cov_SNV		INT	Minimum coverage for tumor (SNVs) [${TD_cov_SNV}]
   --TD_cov_INDEL	INT	Minimum coverage for tumor (INDELs) [${TD_cov_INDEL}]
   --ND_cov_SNV		INT	Minimum coverage for normal (SNVs) [${ND_cov_SNV}]
