@@ -879,10 +879,14 @@ refinement() {
 	## Keep intermediate files
 	if [ "${keep}" = "False" ]; then
 		mv ${comparison}/mutations_${comparison}.vcf .
-		rm -rf ${comparison}
 		log "${comparison}" "." "Removing intermediate files"
+		log "${comparison}" "." "***** Case ${comparison} has finished *****\n\n\n"
+		cat ${comparison}/${comparison}_RFcaller.log >> RFcaller.log
+		rm -rf ${comparison}
 	fi
 	log "${comparison}" "." "***** Case ${comparison} has finished *****\n\n\n"
+	cat ${comparison}/${comparison}_RFcaller.log >> RFcaller.log
+	rm ${comparison}/${comparison}_RFcaller.log
 }
 
 ####### Pipeline
@@ -1165,13 +1169,3 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 	fi 
 done
 wait
-
-## Merge log
-cat ${input} | while read -r normal normal_bam tumor tumor_bam comparison ref_vcf; do
-	if [ -d ${comparison} ]; then
-		cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
-		rm ${comparison}/${comparison}_RFcaller.log
-	else
-		continue
-	fi
-done
