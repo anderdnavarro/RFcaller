@@ -111,25 +111,6 @@ argparse(){
 				input=$(realpath ${VALUE})
 			fi
 			;;
-			-w | --workDir)
-			if [ ! -d ${VALUE} ]; then
-				echo -e "ERROR: The directory provided does not exist\n"
-				help
-			else
-				workDir=${VALUE}
-			fi
-			;;
-			-b | --bamsDir)
-			if [ ! -d ${VALUE} ]; then
-				echo -e "ERROR: The directory provided does not exist\n"
-				help
-			else
-				bamsDir=${VALUE}
-			fi
-			;;
-			-o | --outputDir)
-			outputDir=${VALUE}
-			;;
 			-g | --genome)
 			if [ ! -f ${VALUE} ]; then
 				echo -e "ERROR: The genome provided does not exist\n"
@@ -183,6 +164,25 @@ argparse(){
 					tabix --force ${dbSNP}
 				fi
 			fi
+			;;
+			-w | --workDir)
+			if [ ! -d ${VALUE} ]; then
+				echo -e "ERROR: The directory provided does not exist\n"
+				help
+			else
+				workDir=${VALUE}
+			fi
+			;;
+			-b | --bamsDir)
+			if [ ! -d ${VALUE} ]; then
+				echo -e "ERROR: The directory provided does not exist\n"
+				help
+			else
+				bamsDir=${VALUE}
+			fi
+			;;
+			-o | --outputDir)
+			outputDir=${VALUE}
 			;;
 			--positions)
 			if [ "${VALUE}" = "BED" ]; then
@@ -938,30 +938,21 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 			log "general" "." "ERROR: Skipping case ${comparison}. Check BAMs paths!\n"
 			continue
 		else
-			# Check if BAMs are indexed
-			if [ "${normal_bam##*.}" == "bam" ]; then
-				normal_index=${normal_bam}.bai
-			elif [ "${normal_bam##*.}" == "cram" ]; then
-				normal_index=${normal_bam}.crai
+			## Check if BAMs are indexed and if not, index them
+			if [ ! -f ${normal_bam}.bai ] && [ ! -f ${normal_bam}.crai ]; then
+				log "general" "." "Indexing ${normal_bam}\n"
+				samtools index -b -@ ${threads} ${normal_bam}
 			fi
-			if [ "${tumor_bam##*.}" == "bam" ]; then
-				tumor_index=${tumor_bam}.bai
-			elif [ "${tumor_bam##*.}" == "cram" ]; then
-				tumor_index=${tumor_bam}.crai
+			if [ ! -f ${tumor_bam}.bai ] && [ ! -f ${tumor_bam}.crai ]; then
+				log "general" "." "Indexing ${tumor_bam}\n"
+				samtools index -b -@ ${threads} ${tumor_bam}
 			fi
-			exist ${normal_index} ${tumor_index}
-			# If any of indexes don't exist, skip the current case
-			if [ "$?" -eq 0 ]; then
-				log "general" "." "ERROR: Skipping case ${comparison}. BAMs must be indexed!\n"
-				continue
-			else
-				## Create a new directory for calling
-				if [ -d "${comparison}" ]; then
-					rm -rf ${comparison}
-				fi
-				mkdir -p ${comparison}/calling 
-				log "${comparison}" "." "***** Starting case ${comparison} in ${workDir}/${comparison} *****"
+			## Create a new directory for calling
+			if [ -d "${comparison}" ]; then
+				rm -rf ${comparison}
 			fi
+			mkdir -p ${comparison}/calling 
+			log "${comparison}" "." "***** Starting case ${comparison} in ${workDir}/${comparison} *****"
 		fi
 
 		### VCF or ZERO pipeline
