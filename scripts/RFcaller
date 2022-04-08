@@ -940,11 +940,11 @@ for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
 		else
 			## Check if BAMs are indexed and if not, index them
 			if [ ! -f ${normal_bam}.bai ] && [ ! -f ${normal_bam}.crai ]; then
-				log "general" "." "Indexing ${normal_bam}\n"
+				log "general" "." "Indexing ${normal_bam}"
 				samtools index -b -@ ${threads} ${normal_bam}
 			fi
 			if [ ! -f ${tumor_bam}.bai ] && [ ! -f ${tumor_bam}.crai ]; then
-				log "general" "." "Indexing ${tumor_bam}\n"
+				log "general" "." "Indexing ${tumor_bam}"
 				samtools index -b -@ ${threads} ${tumor_bam}
 			fi
 			## Create a new directory for calling
