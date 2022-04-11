@@ -60,8 +60,7 @@ Options:
 				It must contain the following columns:
 				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
   -g, --genome		FILE	Reference genome in FASTA format
-  -p, --dbSNP		FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
-  -w, --workDir		DIR	Directory where run the pipeline [${workDir}]
+  -p, --dbSNP		STR/FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
   -o, --outputDir	STR	Name for the output directory [${outputDir}]
   --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
@@ -163,14 +162,6 @@ argparse(){
 					fi
 					tabix --force ${dbSNP}
 				fi
-			fi
-			;;
-			-w | --workDir)
-			if [ ! -d ${VALUE} ]; then
-				echo -e "ERROR: The directory provided does not exist\n"
-				help
-			else
-				workDir=${VALUE}
 			fi
 			;;
 			-b | --bamsDir)
