@@ -1,4 +1,6 @@
 # RFcaller
+[![Support this project by running your production jobs at BatchX](https://images.batchx.io/gh-badge-logo.svg)](https://platform.batchx.io/uniovi/tools/labxa%2Frfcaller "Support this project by running your production jobs at BatchX")
+
 A pipeline that uses read-level features and extra trees/random forest algorithms for accurate and fast detection of somatic mutations in next generation sequencing data.
 
 ## Index
