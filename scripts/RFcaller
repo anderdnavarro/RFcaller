@@ -14,16 +14,21 @@ set -u
 #### Load defaults
 ## Required files
 input=''
+normal_bam=''
+tumor_bam=''
+comparison=''
 genome=''
 dbSNP=''
 ploidy_file=''
 
 ## General
+normal="normal"
+tumor="tumor"
 workDir=$(pwd)
-outputDir='.'
 bamsDir='/bams'
+regions=''
+pipeline="ZERO"
 threads=20
-positions='VCF'
 contamination=0.05
 includePatches='False'
 keep='False'
@@ -55,16 +60,26 @@ help(){
 Usage: RFcaller [options]"
 	echo -e "
 Options:
-  -@			INT	Number of threads to use [${threads}]
+------------------------------------------------  INPUT OPTIONS  -----------------------------------------------
   -i, --input		FILE	TSV FILE with the cases to analyze
 				It must contain the following columns:
 				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
+  -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
+-----------------------------------------------------  or  -----------------------------------------------------
+  -n, --normal		STR	Name for normal files [${normal}]
+  -nb, --normalBam	FILE	Path to normal BAM
+  -t, --tumor		STR	Name for tumor files [${tumor}]
+  -tb, --tumorBam	FILE	Path to tumor BAM
+  -o, --output		STR	Output file
+\n------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
+  -@			INT	Number of threads to use [${threads}]
+  -r, --regions		FILE	List of regions in which to make the call in VCF or BCF format
   -g, --genome		FILE	Reference genome in FASTA format
   -p, --dbSNP		STR/FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
-  -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
-  -o, --outputDir	STR	Name for the output directory [${outputDir}]
-  --positions		STR	Format of the file with the positions to make the call (choices: VCF/BED) [${positions}]
   --ploidy_file		STR/FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
+  --includePatches	TAG	Analyze both canonical chromosomes and patches
+  --keep		TAG	Keep intermediate files
+\n--------------------------------------------  ADDITIONAL PARAMETERS  -------------------------------------------
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
   --TD_cov_SNV		INT	Minimum coverage for tumor (SNVs) [${TD_cov_SNV}]
   --TD_cov_INDEL	INT	Minimum coverage for tumor (INDELs) [${TD_cov_INDEL}]
@@ -78,8 +93,6 @@ Options:
   --SNV_threshold	FLOAT	Minimum regression value to consider a SNV as good [${SNV_threshold}]
   --INDEL_threshold	FLOAT	Minimum regression value to consider an INDEL as good [${INDEL_threshold}]
   --polyINDEL_threshold	FLOAT	Minimum regression value to consider an homopolymerINDEL as good [${polyINDEL_threshold}]
-  --includePatches	TAG	Analyze both canonical chromosomes and patches
-  --keep		TAG	Keep intermediate files
   -h, --help			Show this help and exit
 "
 	exit 0
@@ -108,6 +121,40 @@ argparse(){
 				help
 			else
 				input=$(realpath ${VALUE})
+			fi
+			;;
+			-n | --normal)
+			normal=${VALUE}
+			;;
+			-nb | --normalBam)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The normal BAM provided does not exist\n"
+				help
+			else
+				normal_bam=${VALUE}
+			fi
+			;;
+			-t | --tumor)
+			tumor=${VALUE}
+			;;
+			-tb | --tumorBam)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The tumor BAM provided does not exist\n"
+				help
+			else
+				tumor_bam=${VALUE}
+			fi
+			;;
+			-o | --output)
+			comparison=${VALUE}
+			;;
+			-r | --regions)
+			if [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The file with the regions provided does not exist\n"
+				help
+			else
+				regions=$(realpath ${VALUE})
+				pipeline="VCF"
 			fi
 			;;
 			-g | --genome)
@@ -170,17 +217,6 @@ argparse(){
 				help
 			else
 				bamsDir=${VALUE}
-			fi
-			;;
-			-o | --outputDir)
-			outputDir=${VALUE}
-			;;
-			--positions)
-			if [ "${VALUE}" = "BED" ]; then
-				positions='BED'
-			elif [ "${VALUE}" != "VCF" ] && [ "${VALUE}" != "BED" ]; then
-				echo -e "ERROR: Positions argument must be a VCF or a BED file\n"
-				help
 			fi
 			;;
 			--contamination)
@@ -265,8 +301,11 @@ argparse(){
 	done
 
 	# Check if the required arguments exist
-	if [ "${input}" = "" ]; then
+	if [ "${input}" = "" ] && ([ "${normal_bam}" = "" ] || [ "${tumor_bam}" = "" ] || [ "${comparison}" = "" ]); then
 		echo -e "ERROR: You must provide an input\n"
+		help
+	elif [ "${input}" != "" ] && ([ "${normal_bam}" != "" ] || [ "${tumor_bam}" != "" ] || [ "${comparison}" != "" ]); then
+		echo -e "ERROR: --input cannot be used together with --normalBam, --tumorBam and --output"
 		help
 	elif [ "${genome}" = "" ]; then
 		echo -e "ERROR: You must provide a genome\n"
@@ -296,9 +335,9 @@ argparse(){
 log(){
 	d=$(date '+%Y-%m-%d  %H:%M')
 	if [ "$1" = "general" ]; then
-		echo -e "${d} // $3" >>${workDir}/${outputDir}/RFcaller${2}log
+		echo -e "${d} // $3" >>${workDir}/RFcaller${2}log
 	else
-		echo -e "${d} // $3" >>${workDir}/${outputDir}/$1/${1}_RFcaller${2}log
+		echo -e "${d} // $3" >>${workDir}/$1/${1}_RFcaller${2}log
 	fi
 }
 
@@ -324,6 +363,18 @@ exist(){
 		fi
 	done
 	return 1
+}
+
+## Check the format of the file with the regions to analyze (VCF or BED)
+regions_format(){
+	bcftools query -l ${regions} &>/dev/null
+	if [ "$?" -eq 1 ]; then
+		return 0
+	elif [ $(awk '{print NF}' ${regions} | sort -nu | tail -n 1) -eq 1 ];then
+		return 1
+	else
+		return 2
+	fi
 }
 
 ## Detect if the sample is male or female
@@ -880,6 +931,231 @@ refinement() {
 	rm ${comparison}/${comparison}_RFcaller.log
 }
 
+calling(){
+	normal=$1
+	normal_bam=$2
+	tumor=$3
+	tumor_bam=$4
+	comparison=$5
+	pipeline=$6
+	if [ "${pipeline}" = "VCF" ]; then
+		regions=$7
+	else
+		regions=""
+	fi
+
+	## Check if BAMs are indexed and if not, index them
+	if [ ! -f ${normal_bam}.bai ] && [ ! -f ${normal_bam}.crai ]; then
+		log "general" "." "Indexing ${normal_bam}"
+		samtools index -b -@ ${threads} ${normal_bam}
+	fi
+	if [ ! -f ${tumor_bam}.bai ] && [ ! -f ${tumor_bam}.crai ]; then
+		log "general" "." "Indexing ${tumor_bam}"
+		samtools index -b -@ ${threads} ${tumor_bam}
+	fi
+	## Create a new directory for calling
+	if [ -d "${comparison}" ]; then
+		rm -rf ${comparison}
+	fi
+	mkdir -p ${comparison}/calling 
+	log "${comparison}" "." "***** Starting case ${comparison} in ${workDir}/${comparison} *****"
+
+	## Which pipeline is going to be used
+	log "${comparison}" "." "** ${comparison} is going to be analyzed using ${pipeline} pipeline **"
+
+	## Check whether the sample is a male or a female
+	detect_sex
+
+	#### First step: Get the VCF with mutations to analyze
+	### ZERO PIPLINE
+	if [ "${pipeline}" = "ZERO" ]; then
+		log "${comparison}" "." "Getting the VCF with mutations to analyze"
+
+		## Extract the BCF for normal and tumor at the same time for each chromosome
+		# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
+		mkdir ${comparison}/calling/tmp
+		merge_files=''
+		process_id_calling=''
+		# Bcftools call
+		log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
+		log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${ploidy_file}"
+		# Check that the correct reference genome is used 
+		if [ "${includePatches}" = "True" ]; then
+			awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
+		else
+			awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
+		fi
+		if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai)" = "False" ];then
+			log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
+			cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+			rm -rf ${comparison}
+			return 1
+		fi
+		# Extract regions for multithreading
+		vcfutils.pl splitchr -l 50000000 /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
+		for i in $(cat /tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
+		# Call
+		for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
+			if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
+				if [[ "${i}" != *"Y"*  ]]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
+					process_id_calling="${process_id_calling} $!"
+				else
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					process_id_calling="${process_id_calling} $!"
+				fi
+			elif [ "${ploidy_file}" = "GRCm38" ]; then
+				bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+				process_id_calling="${process_id_calling} $!"
+			elif [ "${ploidy_file}" = "GRCm39" ]; then
+				bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+				process_id_calling="${process_id_calling} $!"
+			elif [ "${ploidy_file}" = "None" ]; then
+				bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+				process_id_calling="${process_id_calling} $!"
+			else
+				bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+				process_id_calling="${process_id_calling} $!"
+			fi
+			merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+			# Control the number of threads
+			multithreads ${threads} -
+		done
+		wait ${process_id_calling}
+
+		## Merge all the BCFs in a single VCF file
+		log "${comparison}" "." "-- Merging BCFs"
+		# Check that all the tmp files exist
+		merge_files2=''
+		for merge_file in ${merge_files}; do
+			if [ ! -f ${merge_file} ]; then
+				log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
+			else
+				merge_files2="${merge_files2} ${merge_file}"
+			fi
+		done
+		log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${comparison}/calling/tmp/*.bcf"
+		bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${merge_files2}
+		log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
+
+		## Remove the temporal directory
+		rm -rf ${comparison}/calling/tmp
+
+	### VCF PIPELINE
+	elif [ "${pipeline}" = "VCF" ]; then
+		regions_format
+		## Copy the VCF with a specific name and extract positions
+		if [ "$?" -eq 0 ]; then
+			log "${comparison}" "." "Copying the VCF to the new directory"
+			bcftools view -O z ${regions} -o ${comparison}/calling/input.vcf.gz
+			bcftools view -H ${comparison}/calling/input.vcf.gz | awk '{print $1"\t"$2}' >${comparison}/calling/input.pos
+			rm ${comparison}/calling/input.vcf.gz
+		elif [ "$?" -eq 1 ]; then
+			log "${comparison}" "." "Copying the BED to the new directory"
+			sed 's@[:-]@\t@g' ${regions} > ${comparison}/calling/input.pos
+		else
+			log "${comparison}" "." "Copying the TSV to the new directory"
+			cp ${regions} ${comparison}/calling/input.pos
+		fi
+		
+		## Extract the BCF for normal and tumor at the same time for each chromosome
+		# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
+		mkdir ${comparison}/calling/tmp
+		merge_files=''
+		process_id_calling=''
+		# Bcftools call
+		log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
+		log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${ploidy_file}"
+		# Check that the correct reference genome is used 
+		if [ "${includePatches}" = "True" ]; then
+			awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
+			awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
+		else
+			awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
+			samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
+			samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
+			awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.pos
+		fi
+		if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
+			log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
+			cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+			rm -rf ${comparison}
+			return 1
+		fi
+		# Extract chromosomes for multithreading
+		awk '{print $1}' /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp2.fai
+		for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp2.fai ${comparison}/calling/tmp/.tmp.pos); do
+			# Extract positions for the actual chromosome
+			grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
+			if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
+				if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
+					if [ "${i}" != "Y"  ]; then
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
+						process_id_calling="${process_id_calling} $!"
+					else
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+						process_id_calling="${process_id_calling} $!"
+					fi
+				elif [ "${ploidy_file}" = "GRCm38" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+					process_id_calling="${process_id_calling} $!"
+				elif [ "${ploidy_file}" = "GRCm39" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+					process_id_calling="${process_id_calling} $!"
+				elif [ "${ploidy_file}" = "None" ]; then
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					process_id_calling="${process_id_calling} $!"
+				else
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+					process_id_calling="${process_id_calling} $!"
+				fi
+				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
+				# Control the number of threads
+				multithreads ${threads} -
+			else
+				continue
+			fi
+		done
+		wait ${process_id_calling}
+		
+		## Merge all the BCFs in a single VCF file
+		log "${comparison}" "." "-- Merging BCFs"
+		# Check that all the tmp files exist
+		merge_files2=''
+		for merge_file in ${merge_files}; do
+			if [ ! -f ${merge_file} ]; then
+				log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
+			else
+				merge_files2="${merge_files2} ${merge_file}"
+				continue
+			fi
+		done
+		log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O u ${comparison}/calling/tmp/*.bcf |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -"
+		bcftools concat --threads ${threads} -O u ${merge_files2} |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -
+		log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
+
+		## Remove the temporal directory
+		rm -rf ${comparison}/calling/tmp
+	fi
+
+	## Skip the case if no mutations were detected after the calling
+	if [ "$(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l |awk '{print $1}')" -eq 0 ]; then
+		log "${comparison}" "." "WARNING: There are no mutations to analyze... removing the directory"
+		cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
+		rm -rf ${comparison}
+		return 1
+	fi
+
+	## Launch refinement function
+	refinement ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} &
+}
+
 ####### Pipeline
 ## Parse arguments
 argparse $*
@@ -887,267 +1163,62 @@ argparse $*
 ## Change to work directory
 cd ${workDir}
 
-## Create a directory to save all results
-if [ ! -d ${outputDir} ]; then
-	mkdir ${outputDir}
-fi
-cd ${outputDir}
-
 ## Send all the stderr to a file
-exec 2>${workDir}/${outputDir}/.stderr.log
+exec 2>${workDir}/.stderr.log
 
 ## Write to log
-echo -e "\n\n\n" >>${workDir}/${outputDir}/RFcaller.log
+echo -e "\n\n\n" >>${workDir}/RFcaller.log
 log "general" "." "############   Starting RFcaller pipeline   ############\n"
 tags=''
+if [ "${regions}" != "" ]; then
+	tags="${tags} --regions ${regions}"
+fi
 if [ "${keep}" = "True" ]; then
 	tags="${tags} --keep"
 fi
 if [ "${includePatches}" = "True" ]; then
 	tags="${tags} --includePatches"
 fi
-log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --workDir ${workDir} --bamsDir ${bamsDir} --outputDir ${outputDir} --genome ${genome} --dbSNP ${dbSNP} --positions ${positions} --contamination ${contamination} --ploidy_file ${ploidy_file} --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold} ${tags}\n"
 
 ### Read input file
-for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
-	normal=$(echo ${line} |awk -F ";" '{print $1}')
-	normal_bam=$(echo ${line} |awk -F ";" '{print $2}')
-	tumor=$(echo ${line} |awk -F ";" '{print $3}')
-	tumor_bam=$(echo ${line} |awk -F ";" '{print $4}')
-	comparison=$(echo ${line} |awk -F ";" '{print $5}')
-	ref_vcf=$(echo ${line} |awk -F ";" '{print $6}')
-
-	if [ "${normal}" = "" ]; then
-		continue
-	else
+if [ "${input}" != "" ]; then
+	log "general" "." "USER COMMAND: RFcaller -@ ${threads} --input ${input} --bamsDir ${bamsDir} --genome ${genome} --dbSNP ${dbSNP} --ploidy_file ${ploidy_file} ${tags} --contamination ${contamination}  --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold}\n"
+	for line in $(sed 's@ @\t@g' ${input} |sed 's@\t@;@g'); do
+		normal=$(echo ${line} |awk -F ";" '{print $1}')
+		normal_bam=$(echo ${line} |awk -F ";" '{print $2}')
+		tumor=$(echo ${line} |awk -F ";" '{print $3}')
+		tumor_bam=$(echo ${line} |awk -F ";" '{print $4}')
+		comparison=$(echo ${line} |awk -F ";" '{print $5}')
+		file_regions=$(echo ${line} |awk -F ";" '{print $6}')
+		
+		## Check if BAMs exist
 		normal_bam=/${bamsDir}/${normal_bam}
 		tumor_bam=/${bamsDir}/${tumor_bam}
-		## Check if input BAMs exist
 		exist ${normal_bam} ${tumor_bam}
-		# If any of the files above don't exist, skip the current case
+		### If any of the files above don't exist, skip the current case
 		if [ "$?" -eq 0 ]; then
 			log "general" "." "ERROR: Skipping case ${comparison}. Check BAMs paths!\n"
-			continue
-		else
-			## Check if BAMs are indexed and if not, index them
-			if [ ! -f ${normal_bam}.bai ] && [ ! -f ${normal_bam}.crai ]; then
-				log "general" "." "Indexing ${normal_bam}"
-				samtools index -b -@ ${threads} ${normal_bam}
-			fi
-			if [ ! -f ${tumor_bam}.bai ] && [ ! -f ${tumor_bam}.crai ]; then
-				log "general" "." "Indexing ${tumor_bam}"
-				samtools index -b -@ ${threads} ${tumor_bam}
-			fi
-			## Create a new directory for calling
-			if [ -d "${comparison}" ]; then
-				rm -rf ${comparison}
-			fi
-			mkdir -p ${comparison}/calling 
-			log "${comparison}" "." "***** Starting case ${comparison} in ${workDir}/${comparison} *****"
-		fi
-
-		### VCF or ZERO pipeline
-		if [ "${#ref_vcf}" -eq 0 ]; then
-			## If there isn't anything, start the pipeline from the beginning
-			pipeline='ZERO'
-		elif [ -f ${ref_vcf} ]; then
-			## If the VCF exists, use it
-			pipeline='VCF'
-		else
-			## If the VCF doesn't exist, run the pipeline from the beginning
-			log "${comparison}" "." "WARNING: The VCF/BED for case ${comparison} doesn't exist"
-			pipeline='ZERO'
-		fi
-		log "${comparison}" "." "** ${comparison} is going to be analyzed using ${pipeline} pipeline **"
-
-		## Check whether the sample is a male or a female
-		detect_sex
-
-		#### First step: Get the VCF with mutations to analyze
-		### ZERO PIPLINE
-		if [ "${pipeline}" = "ZERO" ]; then
-			log "${comparison}" "." "Getting the VCF with mutations to analyze"
-
-			## Extract the BCF for normal and tumor at the same time for each chromosome
-			# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
-			mkdir ${comparison}/calling/tmp
-			merge_files=''
-			process_id_calling=''
-			# Bcftools call
-			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
-			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r i ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o ${comparison}/calling/tmp/i.bcf -P 1e-1 --ploidy ${ploidy_file}"
-			# Check that the correct reference genome is used 
-			if [ "${includePatches}" = "True" ]; then
-				awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
-			else
-				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
-			fi
-			if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai)" = "False" ];then
-				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
-				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
-				rm -rf ${comparison}
-				continue
-			fi
-			# Extract regions for multithreading
-			vcfutils.pl splitchr -l 50000000 /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
-			for i in $(cat /tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
-			# Call
-			for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
-				if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
-					if [[ "${i}" != *"Y"*  ]]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
-						process_id_calling="${process_id_calling} $!"
-					else
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-						process_id_calling="${process_id_calling} $!"
-					fi
-				elif [ "${ploidy_file}" = "GRCm38" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
-					process_id_calling="${process_id_calling} $!"
-				elif [ "${ploidy_file}" = "GRCm39" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
-					process_id_calling="${process_id_calling} $!"
-				elif [ "${ploidy_file}" = "None" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-					process_id_calling="${process_id_calling} $!"
-				else
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
-					process_id_calling="${process_id_calling} $!"
-				fi
-				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
-				# Control the number of threads
-				multithreads ${threads} -
-			done
-			wait ${process_id_calling}
-
-			## Merge all the BCFs in a single VCF file
-			log "${comparison}" "." "-- Merging BCFs"
-			# Check that all the tmp files exist
-			merge_files2=''
-			for merge_file in ${merge_files}; do
-				if [ ! -f ${merge_file} ]; then
-					log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
-				else
-					merge_files2="${merge_files2} ${merge_file}"
-					continue
-				fi
-			done
-			log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${comparison}/calling/tmp/*.bcf"
-			bcftools concat --threads ${threads} -O z -o ${comparison}/calling/${comparison}.vcf.gz ${merge_files2}
-			log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
-
-			## Remove the temporal directory
-			rm -rf ${comparison}/calling/tmp
-
-		### VCF PIPELINE
-		elif [ "${pipeline}" = "VCF" ]; then
-			## Copy the VCF with a specific name and extract positions
-			if [ "${positions}" = "VCF" ]; then
-				log "${comparison}" "." "Copying the VCF to the new directory"
-				bcftools view -O z ${ref_vcf} -o ${comparison}/calling/input.vcf.gz
-				bcftools view -H ${comparison}/calling/input.vcf.gz | awk '{print $1"\t"$2}' >${comparison}/calling/input.pos
-			elif [ "${positions}" = "BED" ]; then
-				log "${comparison}" "." "Copying the BED to the new directory"
-				awk '{print $1"\t"$2}' ${ref_vcf} > ${comparison}/calling/input.pos
-			fi
-			
-			## Extract the BCF for normal and tumor at the same time for each chromosome
-			# Make multiBCF output dir, change to it, create the list of bams and a string to merge all the BCFs later
-			mkdir ${comparison}/calling/tmp
-			merge_files=''
-			process_id_calling=''
-			# Bcftools call
-			log "${comparison}" "." "-- Extracting variants from Normal and Tumor BAM. This may take a while..."
-			log "${comparison}" "." "---- COMMAND: bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -R i.pos ${normal_bam} ${tumor_bam}| bcftools call -vmO u -o i.bcf -P 1e-1 --ploidy ${ploidy_file}"
-			# Check that the correct reference genome is used 
-			if [ "${includePatches}" = "True" ]; then
-				awk '{print $1"\t"$2}' ${genome}.fai > /tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' > /tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $3}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
-				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq > ${comparison}/calling/tmp/.tmp.pos
-			else
-				awk '{print $1"\t"$2}' ${genome}.fai | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.fai
-				samtools view -H ${normal_bam} |awk '{print $2}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes > /tmp/.tmp.bai
-				samtools view -H ${normal_bam} |awk '{print $2"\t"$3}' |grep '^SN:' |sed 's@SN:@@' | grep -wf /home/databases/.canonicalChromosomes |awk '{print $2}' |grep '^LN:' |sed 's@LN:@@' > /tmp/.tmp.len.bai
-				awk '{print $1}' ${comparison}/calling/input.pos |sort -k1,1n |uniq | grep -wf /home/databases/.canonicalChromosomes > ${comparison}/calling/tmp/.tmp.pos
-			fi
-			if [ "$(checkChr.py -f /tmp/.tmp.fai -b /tmp/.tmp.bai -l /tmp/.tmp.len.bai -p ${comparison}/calling/tmp/.tmp.pos)" = "False" ];then
-				log "${comparison}" "." "-- WARNING: The BAM genome and the reference genome are not the same... skipping case ${comparison}"
-				cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
-				rm -rf ${comparison}
-				continue
-			fi
-			# Extract chromosomes for multithreading
-			awk '{print $1}' /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp2.fai
-			for i in $(fgrep -wf ${comparison}/calling/tmp/.tmp2.fai ${comparison}/calling/tmp/.tmp.pos); do
-				# Extract positions for the actual chromosome
-				grep -w ^${i} ${comparison}/calling/input.pos >${comparison}/calling/tmp/${i}.pos
-				if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
-					if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
-						if [ "${i}" != "Y"  ]; then
-							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
-							process_id_calling="${process_id_calling} $!"
-						else
-							bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-							process_id_calling="${process_id_calling} $!"
-						fi
-					elif [ "${ploidy_file}" = "GRCm38" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
-						process_id_calling="${process_id_calling} $!"
-					elif [ "${ploidy_file}" = "GRCm39" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
-						process_id_calling="${process_id_calling} $!"
-					elif [ "${ploidy_file}" = "None" ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
-						process_id_calling="${process_id_calling} $!"
-					else
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
-						process_id_calling="${process_id_calling} $!"
-					fi
-					merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
-					# Control the number of threads
-					multithreads ${threads} -
-				else
-					continue
-				fi
-			done
-			wait ${process_id_calling}
-			
-			## Merge all the BCFs in a single VCF file
-			log "${comparison}" "." "-- Merging BCFs"
-			# Check that all the tmp files exist
-			merge_files2=''
-			for merge_file in ${merge_files}; do
-				if [ ! -f ${merge_file} ]; then
-					log "${comparison}" "." "WARNING: The file ${merge_file} doesn't exist or doesn't contain any mutation"
-				else
-					merge_files2="${merge_files2} ${merge_file}"
-					continue
-				fi
-			done
-			log "${comparison}" "." "---- COMMAND: bcftools concat --threads ${threads} -O u ${comparison}/calling/tmp/*.bcf |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -"
-			bcftools concat --threads ${threads} -O u ${merge_files2} |bcftools sort -m 5G -O z -o ${comparison}/calling/${comparison}.vcf.gz -
-			log "${comparison}" "." "------ RESULT: There are $(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l) mutations to analyze"
-
-			## Remove the temporal directory
-			rm -rf ${comparison}/calling/tmp
-		fi
-
-		## Skip the case if no mutations were detected after the calling
-		if [ "$(bcftools view -H ${comparison}/calling/${comparison}.vcf.gz |wc -l |awk '{print $1}')" -eq 0 ]; then
-			log "${comparison}" "." "WARNING: There are no mutations to analyze... removing the directory"
-			cat ${comparison}/${comparison}_RFcaller.log >>RFcaller.log
-			rm -rf ${comparison}
 			continue
 		fi
 
 		## Launch refinement function
-		refinement ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} &
-		
-	fi 
-done
-wait
+		if [ "${#file_regions}" -ne 0 ]; then
+			if [ -f ${file_regions} ]; then
+				pipeline="VCF"
+				reg2use=${file_regions}
+			else
+				log "${comparison}" "." "WARNING: The VCF/BED for case ${comparison} doesn't exist"
+				pipeline="ZERO"
+				reg2use=""
+			fi
+		else
+			reg2use=${regions}
+		fi
+		calling ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} ${pipeline} ${reg2use}
+	done
+	wait
+else
+	log "general" "." "USER COMMAND: RFcaller -@ ${threads} --normal ${normal} --normalBam ${normal_bam} --tumor ${tumor} --tumorBam ${tumor_bam} --output ${comparison} --genome ${genome} --dbSNP ${dbSNP} --ploidy_file ${ploidy_file} ${tags} --contamination ${contamination}  --TD_cov_SNV ${TD_cov_SNV} --TD_cov_INDEL ${TD_cov_INDEL} --ND_cov_SNV ${ND_cov_SNV} --ND_cov_INDEL ${ND_cov_INDEL} --TD_mut_SNV ${TD_mut_SNV} --TD_mut_INDEL ${TD_mut_INDEL} --ND_mut_SNV ${ND_mut_SNV} --ND_mut_INDEL ${ND_mut_INDEL} --ND_window ${ND_window} --SNV_threshold ${SNV_threshold} --INDEL_threshold ${INDEL_threshold} --polyINDEL_threshold ${polyINDEL_threshold}\n"
+	calling ${normal} ${normal_bam} ${tumor} ${tumor_bam} ${comparison} ${pipeline} ${regions}
+	wait
+fi
