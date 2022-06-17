@@ -73,7 +73,7 @@ Options:
   -o, --output		STR	Output file
 \n------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
   -@			INT	Number of threads to use [${threads}]
-  -r, --regions		FILE	List of regions in which to make the call in VCF or BCF format
+  -r, --regions		FILE	List of regions in which to make the call in VCF, BCF or TSV format
   -g, --genome		FILE	Reference genome in FASTA format
   -p, --dbSNP		STR/FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
   --ploidy_file		STR/FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
