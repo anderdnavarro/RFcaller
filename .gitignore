@@ -1,0 +1,5 @@
+.dockerignore
+databases/dbSNP
+databases/hg19
+databases/hg38
+databases/PoN/original

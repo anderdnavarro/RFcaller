@@ -1,0 +1,292 @@
+{
+  "name": "labxa/rfcaller",
+  "title": "Random Forest algorithms to detect somatic mutations in tumor-normal samples",
+  "version": "1.1.8",
+  "schema": {
+    "input": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "normal": {
+          "type": "object",
+          "required": true,
+          "description": "Normal BAM",
+          "properties": {
+            "normalBam": {
+              "type": "string",
+              "format": "file",
+              "required": true,
+              "description": "Normal BAM (CRAM supported)"
+            },
+            "normalName": {
+              "type": "string",
+              "required": true,
+              "description": "Name of normal sample"
+            },
+            "normalIndex": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "Index of normal BAM. Not required but recommended. It can be generated with samtools index"
+            }
+          }
+        },
+        "tumor": {
+          "type": "object",
+          "required": true,
+          "description": "Tumor BAM",
+          "properties": {
+            "tumorBam": {
+              "type": "string",
+              "format": "file",
+              "required": true,
+              "description": "Tumor BAM (CRAM supported)"
+            },
+            "tumorName": {
+              "type": "string",
+              "required": true,
+              "description": "Name of tumor sample"
+            },
+            "tumorIndex": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "Index of tumor BAM. Not required but recommended. It can be generated with samtools index."
+            }
+          }
+        },
+        "outputName": {
+          "type": "string",
+          "required": true,
+          "description": "Name of the analysis"
+        },
+        "genome": {
+          "type": "object",
+          "required": true,
+          "description": "Reference genome",
+          "properties": {
+            "genomeFasta": {
+              "type": "string",
+              "format": "file",
+              "required": true,
+              "description": "Reference genome in FASTA format (bgzip supported)"
+            },
+            "genomeIndexFai": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "FAI index of FASTA genome. Not required but recommended. It can be generated with samtools faidx"
+            },
+            "genomeIndexGzi": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "GZI index of FASTA genome. Only when the FASTA is compressed with BGZIP. Not required but recommended. It can be generated with samtools faidx"
+            }
+          }
+        },
+        "dbSNP": {
+          "type": "string",
+          "required": true,
+          "default": "hg19",
+          "enum": [
+            "hg19",
+            "hg38",
+            "Other"
+          ],
+          "description": "VCF files provided by the image with common SNPs (MAF ≥ 1%) to eliminate these positions from the analysis. In case you want to use your own VCFs use the 'Other' argument and complete the 'dbSNPuser' option."
+        },
+        "dbSNPuser": {
+          "type": "object",
+          "required": false,
+          "description": "Same as 'dbSNP', but provided by the user. Only when 'dbSNP' argument is 'Other'",
+          "properties": {
+            "dbSNPfile": {
+              "type": "string",
+              "format": "file",
+              "required": true,
+              "description": "VCF provided by the user with common SNPs to eliminate these positions from the analysis (bgzip supported)"
+            },
+            "dbSNPindex": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "In case of upload a VCF.GZ (bgzip) file, provide also the index. Not required but recommended. It can be generated with tabix"
+            }
+          }
+        },
+        "PoN": {
+          "type": "string",
+          "required": false,
+          "enum": [
+            "hg19",
+            "hg38",
+            "None",
+            "Other"
+          ],
+          "description": "TSV provided by the image with positions that appear recurrently in a Panel of Normals to eliminate them from the analysis. In case you want to use your own PoN use the 'Other' argument and complete the 'PoNuser' option."
+        },
+        "PoNuser": {
+          "type": "object",
+          "required": false,
+          "description": "Same as 'PoN', but provided by the user. Only when 'PoN' argument is 'Other'",
+          "properties": {
+            "PoNfile": {
+              "type": "string",
+              "format": "file",
+              "required": true,
+              "description": "PoN provided by the user with positions to eliminate from the analysis (bgzip not supported)."
+            }
+          }
+        },
+        "regions": {
+          "type": "string",
+          "format": "file",
+          "required": false,
+          "description": "List of regions in which to make the call in VCF, BCF or TSV format"
+        },
+        "contamination": {
+          "type": "number",
+          "required": false,
+          "default": 0.05,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Percentage of tumor contamination in normal sample"
+        },
+        "assembly": {
+          "type": "object",
+          "required": false,
+          "description": "BCFTOOLS tag for ploidy to use in variant calling",
+          "properties": {
+            "assemblyTag": {
+              "type": "string",
+              "required": true,
+              "enum": [
+                "GRCh37",
+                "GRCh38",
+                "GRCm38",
+                "GRCm39",
+                "Other",
+                "None"
+              ],
+              "description": "BCFTOOLS tag for ploidy to use in variant calling"
+            },
+            "assemblyFile": {
+              "type": "string",
+              "format": "file",
+              "required": false,
+              "description": "File with ploidy information. For more information use the command bcftools call --ploidy ?"
+            }
+          }
+        },
+        "TD_cov_SNV": {
+          "type": "number",
+          "required": false,
+          "default": 7,
+          "minimum": 3,
+          "description": "Minimum coverage for tumor sample (SNVs)"
+        },
+        "TD_cov_INDEL": {
+          "type": "number",
+          "required": false,
+          "default": 7,
+          "minimum": 3,
+          "description": "Minimum coverage for tumor sample (INDELs)"
+        },
+        "ND_cov_SNV": {
+          "type": "number",
+          "required": false,
+          "default": 7,
+          "minimum": 3,
+          "description": "Minimum coverage for normal sample (SNVs)"
+        },
+        "ND_cov_INDEL": {
+          "type": "number",
+          "required": false,
+          "default": 7,
+          "minimum": 3,
+          "description": "Minimum coverage for normal sample (INDELs)"
+        },
+        "TD_mut_SNV": {
+          "type": "number",
+          "required": false,
+          "default": 3,
+          "minimum": 2,
+          "description": "Minimum number of mutated reads for a position in tumor sample to not discard it (SNVs)."
+        },
+        "TD_mut_INDEL": {
+          "type": "number",
+          "required": false,
+          "default": 4,
+          "minimum": 3,
+          "description": "Minimum number of mutated reads for a position in tumor sample to not discard it (INDELs)."
+        },
+        "ND_mut_SNV": {
+          "type": "number",
+          "required": false,
+          "default": 3,
+          "minimum": 0,
+          "description": "Maximum number of mutated reads allowed for a position in normal sample (SNVs)."
+        },
+        "ND_mut_INDEL": {
+          "type": "number",
+          "required": false,
+          "default": 2,
+          "minimum": 0,
+          "description": "Maximum number of mutated reads allowed for a position in normal sample (INDELs)."
+        },
+        "ND_window": {
+          "type": "number",
+          "required": false,
+          "default": 10,
+          "minimum": 5,
+          "description": "Window size around a position to look for mutations in normal sample (INDELs)"
+        },
+        "SNV_threshold": {
+          "type": "number",
+          "required": false,
+          "default": 10.726,
+          "description": "Minimum regression value to consider a SNV as good"
+        },
+        "INDEL_threshold": {
+          "type": "number",
+          "required": false,
+          "default": 32.1418,
+          "description": "Minimum regression value to consider an INDEL as good"
+        },
+        "polyINDEL_threshold": {
+          "type": "number",
+          "required": false,
+          "default": 0.7723,
+          "description": "Minimum regression value to consider an homopolymerINDEL as good"
+        }
+      }
+    },
+    "output": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "vcf": {
+          "type": "string",
+          "format": "file",
+          "required": true,
+          "description": "VCF with the mutations detected by the pipeline"
+        },
+        "log": {
+          "type": "string",
+          "format": "file",
+          "required": true,
+          "description": "Log file"
+        }
+      }
+    }
+  },
+  "changeLog": "Initial version",
+  "scm": "https://github.com/xa-lab/RFcaller",
+  "runtime": {
+    "minMem": 20000
+  },
+  "author": "Ander Díaz-Navarro & Xose S. Puente"
+}
