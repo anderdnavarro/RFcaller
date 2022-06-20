@@ -7,8 +7,8 @@ RUN ["/bin/bash", "-c", "pip3 install --no-cache-dir argparse==1.4.0 asn1crypto=
 COPY samtools/ /home/samtools/
 RUN ["/bin/bash", "-c", "cd /home/samtools; for i in htslib-1.10.2 bcftools-1.10.2 samtools-1.10; do tar xvjf ${i}.tar.bz2; cd ${i}; ./configure; make; make install; cd ../; done; cd /home/; rm -rf samtools"]
 ## Install bedtools
-COPY bedtools.zip /usr/local/bin/
-RUN ["/bin/bash", "-c", "unzip -qq bedtools.zip; rm /usr/local/bin/bedtools.zip"]
+COPY bedtools.zip /
+RUN ["/bin/bash", "-c", "unzip -qq -d /usr/local/bin/ bedtools.zip; rm bedtools.zip"]
 ## Copy necessary files
 COPY databases/ /home/databases/
 COPY RFcaller/ /home/RFcaller/
