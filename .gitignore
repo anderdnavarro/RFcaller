@@ -1,4 +1,5 @@
 .dockerignore
+.gitignore
 databases/dbSNP
 databases/hg19
 databases/hg38
