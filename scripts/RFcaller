@@ -19,6 +19,7 @@ tumor_bam=''
 comparison=''
 genome=''
 dbSNP=''
+PoN=''
 ploidy_file=''
 
 ## General
@@ -76,6 +77,7 @@ Options:
   -r, --regions		FILE	List of regions in which to make the call in VCF, BCF or TSV format
   -g, --genome		FILE	Reference genome in FASTA format
   -p, --dbSNP		STR/FILE	VCF with common SNPs (choices: hg19/hg38/your_dbSNP)
+  --PoN			STR/FILE	TSV (CHROM, FROM, TO) with positions appearing in a Panel of Normals. Use 'RFcaller --PoN ?' for more information
   --ploidy_file		STR/FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
   --includePatches	TAG	Analyze both canonical chromosomes and patches
   --keep		TAG	Keep intermediate files
@@ -178,12 +180,20 @@ argparse(){
 			if [ "${VALUE}" = "hg19" ]; then
 				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg19_combined.vcf.gz"
 				dbSNPtag="hg19"
+				if [ "${PoN}" = "" ]; then
+					PoN="/home/databases/PoN/PanelOfNormals_hs37d5.tsv.gz"
+					PoNtag="hg19"
+				fi
 				if [ "${ploidy_file}" = "" ]; then
 					ploidy_file="GRCh37"
 				fi
 			elif [ "${VALUE}" = "hg38" ]; then
 				dbSNP="/home/databases/dbSNP/UCSC_dbSNP153Common_hg38_combined.vcf.gz"
 				dbSNPtag="hg38"
+				if [ "${PoN}" = "" ]; then
+					PoN="/home/databases/PoN/PanelOfNormals_hg38.tsv.gz"
+					PoNtag="hg38"
+				fi
 				if [ "${ploidy_file}" = "" ]; then
 					ploidy_file="GRCh38"
 				fi
@@ -209,6 +219,33 @@ argparse(){
 					fi
 					tabix --force ${dbSNP}
 				fi
+			fi
+			;;
+			--PoN)
+			if  [ "${VALUE}" = "?" ]; then
+				echo -e "
+	By default if the user specifies dbSNP=hg19 or dbSNP=hg38, --PoN is PanelOfNormals_hs37d5.tsv.gz or PanelOfNormals_hg38.tsv.gz respectively.
+	Otherwise, you must select between the following options: 
+		- Predefined options: hg19, hg38
+		- None (no Panel of Normals is used)
+		- Provide your own Panel of Normals in TSV format with 3 columns (CHROM, FROM, TO). Bgzip not supported.
+	"
+			elif [ "${VALUE}" = "hg19" ]; then
+				PoN="/home/databases/PoN/PanelOfNormals_hs37d5.tsv.gz"
+				PoNtag="hg19"
+			elif [ "${VALUE}" = "hg38" ]; then
+				PoN="/home/databases/PoN/PanelOfNormals_hg38.tsv.gz"
+				PoNtag="hg38"
+			elif [ "${VALUE}" = "None" ]; then
+				PoN=${VALUE}
+			elif [ ! -f ${VALUE} ]; then
+				echo -e "ERROR: The Panel of Normals provided does not exist\n"
+				help
+			else
+				bedtools sort -i ${VALUE} | awk '{print $1"\t"$2"\t"$3"\tPoN"}' |grep -v '^#' > /home/databases/PoN/PoN.tsv
+				bgzip /home/databases/PoN/PoN.tsv
+				PoN="/home/databases/PoN/PoN.tsv.gz"
+				tabix -p bed ${PoN}
 			fi
 			;;
 			-b | --bamsDir)
@@ -323,10 +360,18 @@ argparse(){
 		echo -e "ERROR: dbSNP and ploidy_file fields must correspond to the same genome version\n"
 		help
 	fi
+	if ([ "${dbSNPtag}" = "hg19" ] && [ "${PoNtag}" = "hg38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${PoNtag}" = "hg19" ]); then
+		echo -e "ERROR: dbSNP and PoN fields must correspond to the same genome version\n"
+		help
+	fi
 
-	# Check if dbSNP is in the same format as the genome
+	# Check if dbSNP/PoN is in the same format as the genome
 	if [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(bcftools view -H ${dbSNP} | head -n1 | grep "^chr" | wc -l)" ]; then
 		echo -e "ERROR: Reference genome and dbSNP are not in the same format\n"
+		exit 0
+	fi
+	if [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(zcat ${PoN} | head -n1 | grep "^chr" | wc -l)" ]; then
+		echo -e "ERROR: Reference genome and PoN are not in the same format\n"
 		exit 0
 	fi
 }
@@ -831,8 +876,13 @@ refinement() {
 
 	## Label SNPs and filter them
 	log "${comparison}" "." "-- Filtering SNPs and very low confident positions"
-	log "${comparison}" "." "---- COMMAND: bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID==\".\" & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT=\"mis\"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -"
-	bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID=="." & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT="mis"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -
+	if [ "${PoN}" = "" ] || [ "${PoN}" = "None" ]; then
+		log "${comparison}" "." "---- COMMAND: bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID==\".\" & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT=\"mis\"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -"
+		bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID=="." & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT="mis"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -
+	else
+		log "${comparison}" "." "---- COMMAND: bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools annotate --threads ${threads} -a ${PoN} -O u -c CHROM,FROM,TO,ID - |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID==\".\" & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT=\"mis\"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -"
+		bcftools annotate --threads ${threads} -a ${dbSNP} -O u -c CHROM,POS,ID,REF,ALT,-,-,- ${comparison}/calling/${comparison}.norm.vcf.gz |bcftools annotate --threads ${threads} -a ${PoN} -O u -c CHROM,FROM,TO,ID - |bcftools filter -g 5 -i 'FORMAT/DP[0]>=5 && FORMAT/DP[1]>=5' -O u - |bcftools filter -i 'ID=="." & FORMAT/AD[0:1]<=10 && FORMAT/AD[1:1]>=3' - |bcftools filter -e 'FORMAT/GT="mis"' -O z -o ${comparison}/calling/${comparison}.filter.norm.vcf.gz -
+	fi
 	tabix ${comparison}/calling/${comparison}.filter.norm.vcf.gz
 	log "${comparison}" "." "------ RESULT: $(( $(bcftools view -H ${comparison}/calling/${comparison}.norm.vcf.gz |wc -l |awk '{print $1}')-$(bcftools view -H ${comparison}/calling/${comparison}.filter.norm.vcf.gz |wc -l |awk '{print $1}') )) positions have been filtered. $(bcftools view -H ${comparison}/calling/${comparison}.filter.norm.vcf.gz |wc -l |awk '{print $1}') mutations remaining"
 
@@ -1170,6 +1220,9 @@ exec 2>${workDir}/.stderr.log
 echo -e "\n\n\n" >>${workDir}/RFcaller.log
 log "general" "." "############   Starting RFcaller pipeline   ############\n"
 tags=''
+if [ "${PoN}" != "" ]; then
+	tags="${tags} --PoN ${PoN}"
+fi
 if [ "${regions}" != "" ]; then
 	tags="${tags} --regions ${regions}"
 fi

@@ -53,6 +53,15 @@ elif parsedJson["dbSNP"] == "hg19":
 elif parsedJson["dbSNP"] == "hg38":
 	dbSNP = "hg38"
 
+# Check PoN
+if "PoN" in parsedJson:
+	if parsedJson["PoN"] == "Other":
+		PoN = parsedJson["PoNuser"]["PoNfile"]
+	else:
+		PoN = parsedJson["PoN"]
+else:
+	PoN = "NULL"
+
 # Check regions
 if "regions" in parsedJson:
 	regions = parsedJson["regions"]
@@ -166,6 +175,8 @@ try:
 		+ " --SNV_threshold " + str(SNV_threshold) \
 		+ " --INDEL_threshold " + str(INDEL_threshold) \
 		+ " --polyINDEL_threshold " + str(polyINDEL_threshold)
+	if (PoN != "NULL"):
+		cmd += " --PoN " + PoN
 	if (regions != "NULL"):
 		cmd += " --regions " + regions
 	if (ploidyFile != "NULL"):
