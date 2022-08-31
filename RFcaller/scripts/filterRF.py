@@ -43,6 +43,7 @@ def check_polyIndel(polyList, key):
 			return(False)
 
 def main_function(result, pileup, vcf):
+	mutid = 1
 	for line in zip(result, pileup, vcf):
 		pileup_col, vcf_col =  line[1].strip(), line[2].strip()
 		## Process the header of the pileup VCF and add new lines 
@@ -85,7 +86,7 @@ def main_function(result, pileup, vcf):
 			else:
 				real_qual = vcf_qual**res_value
 				threshold = args.threshold
-		
+
 		if real_qual >= threshold:
 			tumor_maf, normal_cov, normal_mut, tumor_mut = float(pileup_col[7].split('=')[1]), int(pileup_col[9].split(':')[0]), int(pileup_col[9].split(':')[3]), int(pileup_col[10].split(':')[3])
 			if args.contamination != 0:
@@ -99,9 +100,10 @@ def main_function(result, pileup, vcf):
 				max_mut_reads_normal = 1
 				
 			if (normal_mut > max_mut_reads_normal) or (tumor_mut <= 5 and normal_mut >= 2):
-				print('\t'.join(pileup_col[:5]), '%.4f' % real_qual, 'LIKELY_GERMINAL', '%s;RF=%.4f' % (pileup_col[7], res_value), '\t'.join(pileup_col[8:]), sep='\t')
+				print(pileup_col[0], pileup_col[1], f"{pileup_col[2]}_{mutid}", '\t'.join(pileup_col[3:5]), '%.4f' % real_qual, 'LIKELY_GERMINAL', '%s;RF=%.4f' % (pileup_col[7], res_value), '\t'.join(pileup_col[8:]), sep='\t')
 			else:
-				print('\t'.join(pileup_col[:5]), '%.4f' % real_qual, 'PASS', '%s;RF=%.4f' % (pileup_col[7], res_value), '\t'.join(pileup_col[8:]), sep='\t')
+				print(pileup_col[0], pileup_col[1], f"{pileup_col[2]}_{mutid}", '\t'.join(pileup_col[3:5]), '%.4f' % real_qual, 'PASS', '%s;RF=%.4f' % (pileup_col[7], res_value), '\t'.join(pileup_col[8:]), sep='\t')
+			mutid += 1
 		else:
 			continue
 
