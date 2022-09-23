@@ -1,5 +1,5 @@
 #!/bin/bash
-set -uxe
+set -u
 
 ###########################################################################
 # Description: 	A pipeline that uses read-level features and extra 
