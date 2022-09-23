@@ -1,5 +1,5 @@
 #!/bin/bash
-set -u
+set -uxe
 
 ###########################################################################
 # Description: 	A pipeline that uses read-level features and extra 
@@ -72,7 +72,7 @@ Options:
   -t, --tumor		STR	Name for tumor files [${tumor}]
   -tb, --tumorBam	FILE	Path to tumor BAM
   -o, --output		STR	Output file
-\n------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
+------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
   -@			INT	Number of threads to use [${threads}]
   -r, --regions		FILE	List of regions in which to make the call in VCF, BCF or TSV format
   -g, --genome		FILE	Reference genome in FASTA format
@@ -81,7 +81,7 @@ Options:
   --ploidy_file		STR/FILE	BCFTOOLS CALL --ploidy_file to use in variant calling. Use 'RFcaller --ploidy_file ?' for more information
   --includePatches	TAG	Analyze both canonical chromosomes and patches
   --keep		TAG	Keep intermediate files
-\n--------------------------------------------  ADDITIONAL PARAMETERS  -------------------------------------------
+--------------------------------------------  ADDITIONAL PARAMETERS  -------------------------------------------
   --contamination	FLOAT	Percentage of tumor contamination in normal sample [0-1] [${contamination}]
   --TD_cov_SNV		INT	Minimum coverage for tumor (SNVs) [${TD_cov_SNV}]
   --TD_cov_INDEL	INT	Minimum coverage for tumor (INDELs) [${TD_cov_INDEL}]
@@ -228,7 +228,7 @@ argparse(){
 	Otherwise, you must select between the following options: 
 		- Predefined options: hg19, hg38
 		- None (no Panel of Normals is used)
-		- Provide your own Panel of Normals in TSV format with 3 columns (CHROM, FROM, TO). Bgzip not supported.
+		- Provide your own Panel of Normals in TSV format with 3 columns (CHROM, FROM, TO). Bgzip supported.
 	"
 			elif [ "${VALUE}" = "hg19" ]; then
 				PoN="/home/databases/PoN/PanelOfNormals_hs37d5.tsv.gz"
@@ -370,7 +370,12 @@ argparse(){
 		echo -e "ERROR: Reference genome and dbSNP are not in the same format\n"
 		exit 0
 	fi
-	if [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(zcat ${PoN} | head -n1 | grep "^chr" | wc -l)" ]; then
+	if [ "${PoN}" = "None" ]; then
+		:
+	elif [ "${PoN##*.}" = "gz" ] && [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(zcat ${PoN} | head -n1 | grep "^chr" | wc -l)" ]; then
+		echo -e "ERROR: Reference genome and PoN are not in the same format\n"
+		exit 0
+	elif [ "${PoN##*.}" != "gz" ] && [ "$(head -n1 ${genome}.fai | grep "^chr" | wc -l)" -ne "$(cat ${PoN} | head -n1 | grep "^chr" | wc -l)" ]; then
 		echo -e "ERROR: Reference genome and PoN are not in the same format\n"
 		exit 0
 	fi
@@ -413,7 +418,7 @@ exist(){
 ## Check the format of the file with the regions to analyze (VCF or BED)
 regions_format(){
 	bcftools query -l ${regions} &>/dev/null
-	if [ "$?" -eq 1 ]; then
+	if [ "$?" -eq 0 ]; then
 		return 0
 	elif [ $(awk '{print NF}' ${regions} | sort -nu | tail -n 1) -eq 1 ];then
 		return 1
@@ -1106,7 +1111,7 @@ calling(){
 			rm ${comparison}/calling/input.vcf.gz
 		elif [ "$?" -eq 1 ]; then
 			log "${comparison}" "." "Copying the BED to the new directory"
-			sed 's@[:-]@\t@g' ${regions} > ${comparison}/calling/input.pos
+			sed 's@\(.*\):\(.*\)-@\1\t\2\t@g' ${regions} > ${comparison}/calling/input.pos
 		else
 			log "${comparison}" "." "Copying the TSV to the new directory"
 			cp ${regions} ${comparison}/calling/input.pos
