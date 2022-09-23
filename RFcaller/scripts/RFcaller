@@ -624,7 +624,7 @@ somaticSNV(){
 	log "${comparison}" "_SNV." "-- Extracting the mini.pileup. This may take a while..."
 	reads_length=$(samtools view ${comparison}/somaticSNV/reduced_${normal}.bam |head -n1 |awk '{print $10}' |wc -m)
 	log "${comparison}" "_SNV." "---- COMMAND: samtools mpileup -aa -R -B -q 30/20 -Q 20/10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticSNV/reduced.positions ${comparison}/somaticSNV/reduced_${tumor}.bam ${comparison}/somaticSNV/reduced_${normal}.bam |awk '\$3!=\"*\"' |filterMP.py -i - -Tcov ${TD_cov_SNV} -Ncov ${ND_cov_SNV} -Tmut ${TD_mut_SNV} -Nmut ${ND_mut_SNV} --output_dir ${comparison}/somaticSNV --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticSNV/${comparison}.mini.pileup.vcf"
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		samtools mpileup -aa -R -B -q 30 -Q 20 -C 50 -s -O --output-QNAME -f ${genome} -l ${comparison}/somaticSNV/reduced.positions -r ${i} ${comparison}/somaticSNV/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticSNV/tmp/${i}.tumor.mini.pileup &
 		process_id_pileup_SNV="${process_id_pileup_SNV} $!"
 		samtools mpileup -aa -R -B -q 20 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticSNV/reduced.positions -r ${i} ${comparison}/somaticSNV/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticSNV/tmp/${i}.normal.mini.pileup &
@@ -634,7 +634,7 @@ somaticSNV(){
 		multithreads ${threads} 6
 	done
 	wait ${process_id_pileup_SNV}
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticSNV/tmp/${i}.normal.mini.pileup |paste ${comparison}/somaticSNV/tmp/${i}.tumor.mini.pileup - >${comparison}/somaticSNV/tmp/${i}.mini.pileup
 	done
 	# Filter the mini pileup
@@ -744,7 +744,7 @@ somaticINDEL(){
 	log "${comparison}" "_INDEL." "-- Extracting the indel.mini.pileup. This may take a while..."
 	reads_length=$(samtools view ${comparison}/somaticINDEL/reduced_${normal}.bam |head -n1 |awk '{print $10}' |wc -m)
 	log "${comparison}" "_INDEL." "---- COMMAND: samtools mpileup -aa -R -q 40/30 -Q 20/10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/reduced.positions ${comparison}/somaticINDEL/reduced_${tumor}.bam ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '\$3!=\"*\"' |filterMPindels.py -i - -f ${genome} -Tcov ${TD_cov_INDEL} -Ncov ${ND_cov_INDEL} -Tmut ${TD_mut_INDEL} -Nmut ${ND_mut_INDEL} --output_dir ${comparison}/somaticINDEL/ --output_name ${comparison} --ND_name ${normal} --TD_name ${tumor} --sex ${sex} --reads_length ${reads_length} --contamination ${contamination} >${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf"
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		samtools mpileup -aa -R -q 40 -Q 15 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/short_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.tumor.short_indel.mini.pileup &
 		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
 		samtools mpileup -aa -R -q 30 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/short_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.normal.short_indel.mini.pileup &
@@ -754,12 +754,12 @@ somaticINDEL(){
 		multithreads ${threads} 6
 	done
 	wait ${process_id_pileup_INDEL}
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.short_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.short_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.short_indel.mini.pileup
 	done
 	# Samtools mpileup long indels
 	process_id_pileup_INDEL=''
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		samtools mpileup -aa -R -B -q 40 -Q 20 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/long_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${tumor}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup &
 		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
 		samtools mpileup -aa -R -B -q 30 -Q 10 -C 50 -s -O -f ${genome} -l ${comparison}/somaticINDEL/long_reduced.positions -r ${i} ${comparison}/somaticINDEL/reduced_${normal}.bam |awk '$3!="*"' >${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup &
@@ -769,7 +769,7 @@ somaticINDEL(){
 		multithreads ${threads} 6
 	done
 	wait ${process_id_pileup_INDEL}
-	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai |tr ':-' '\t') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
+	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
 		awk '{print $4"\t"$5"\t"$6"\t"$7"\t"$8}' ${comparison}/somaticINDEL/tmp/${i}.normal.long_indel.mini.pileup |paste ${comparison}/somaticINDEL/tmp/${i}.tumor.long_indel.mini.pileup - >${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup
 	done
 	# Filter the mini pileup
