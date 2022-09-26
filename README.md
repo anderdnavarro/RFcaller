@@ -1,9 +1,4 @@
-<p align="left">
-  <a href="https://github.com/xa-lab/RFcaller/tree/master/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license"/>
-  </a>
-  <img src="https://img.shields.io/badge/version-1.1.0-blue.svg?cacheSeconds=2592000" alt="version"/>
-</p>
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue.svg?cacheSeconds=2592000)
 
 # RFcaller
 
