@@ -1,4 +1,4 @@
-[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue.svg?cacheSeconds=2592000)
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue.svg?cacheSeconds=2592000) [![DOI](https://zenodo.org/badge/doi/10.1101/2022.05.11.491496.svg)](https://doi.org/10.1101/2022.05.11.491496)
 
 # RFcaller
 
@@ -7,6 +7,8 @@ A pipeline that uses read-level features and extra trees/random forest algorithm
 ## Index
 
 1. [Installation](#Installation)
+    - [Docker pull](#Docker-pull)
+    - [Docker build](#Docker-build)
 2. [Quick usage](#Quick-usage)
 3. [Docker options](#Docker-options)
 4. [RFcaller options](#RFcaller-options)
@@ -21,9 +23,11 @@ A pipeline that uses read-level features and extra trees/random forest algorithm
 
 ## Installation
 
-We have created a docker image with all dependencies installed:
+If you don't have docker already installed in your system, please follow these [instructions](https://docs.docker.com/get-docker/).
 
-- If you don't have docker already installed in your system, please follow these [instructions](https://docs.docker.com/get-docker/).
+### Docker pull
+
+We have created a docker image with all dependencies installed:
 
 ```bash
 docker pull labxa/rfcaller:1.1.0
@@ -55,6 +59,20 @@ The image has the following structure:
            |-- scripts
            |-- training
 /output
+```
+
+### Docker build
+
+In case you want to build your own RFcaller image:
+
+```bash
+git clone git@github.com:xa-lab/RFcaller.git
+wget -O databases.zip https://zenodo.org/record/7113432/files/databases.zip?download=1
+unzip databases.zip
+cp -r databases/dbSNP RFcaller/databases
+rm -rf databases databases.zip
+cd RFcaller
+docker build -t labxa/rfcaller:1.1.0 .
 ```
 
 ## Quick usage
