@@ -11,23 +11,27 @@
         "normal": {
           "type": "object",
           "required": true,
+          "title": "normal",
           "description": "Normal BAM",
           "properties": {
             "normalBam": {
               "type": "string",
               "format": "file",
               "required": true,
+              "title": "normalBam",
               "description": "Normal BAM (CRAM supported)"
             },
             "normalName": {
               "type": "string",
               "required": true,
+              "title": "normalName",
               "description": "Name of normal sample"
             },
             "normalIndex": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "normalIndex",
               "description": "Index of normal BAM. Not required but recommended. It can be generated with samtools index"
             }
           }
@@ -35,23 +39,27 @@
         "tumor": {
           "type": "object",
           "required": true,
+          "title": "tumor",
           "description": "Tumor BAM",
           "properties": {
             "tumorBam": {
               "type": "string",
               "format": "file",
               "required": true,
+              "title": "tumorBam",
               "description": "Tumor BAM (CRAM supported)"
             },
             "tumorName": {
               "type": "string",
               "required": true,
+              "title": "tumorName",
               "description": "Name of tumor sample"
             },
             "tumorIndex": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "tumorIndex",
               "description": "Index of tumor BAM. Not required but recommended. It can be generated with samtools index."
             }
           }
@@ -59,29 +67,34 @@
         "outputName": {
           "type": "string",
           "required": true,
+          "title": "outputName",
           "description": "Name of the analysis"
         },
         "genome": {
           "type": "object",
           "required": true,
+          "title": "genome",
           "description": "Reference genome",
           "properties": {
             "genomeFasta": {
               "type": "string",
               "format": "file",
               "required": true,
+              "title": "genomeFasta",
               "description": "Reference genome in FASTA format (bgzip supported)"
             },
             "genomeIndexFai": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "genomeIndexFai",
               "description": "FAI index of FASTA genome. Not required but recommended. It can be generated with samtools faidx"
             },
             "genomeIndexGzi": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "genomeIndexGzi",
               "description": "GZI index of FASTA genome. Only when the FASTA is compressed with BGZIP. Not required but recommended. It can be generated with samtools faidx"
             }
           }
@@ -95,23 +108,27 @@
             "hg38",
             "Other"
           ],
-          "description": "VCF files provided by the image with common SNPs (MAF ≥ 1%) to eliminate these positions from the analysis. In case you want to use your own VCFs use the 'Other' argument and complete the 'dbSNPuser' option."
+          "title": "dbSNP",
+          "description": "VCF files provided by the image with common SNPs (MAF ≥ 1%) to eliminate these positions from the analysis. In case you want to use your own VCFs use the 'Other' argument and complete the 'dbSNPuser' option"
         },
         "dbSNPuser": {
           "type": "object",
           "required": false,
+          "title": "dbSNPuser",
           "description": "Same as 'dbSNP', but provided by the user. Only when 'dbSNP' argument is 'Other'",
           "properties": {
             "dbSNPfile": {
               "type": "string",
               "format": "file",
               "required": true,
+              "title": "dbSNPfile",
               "description": "VCF provided by the user with common SNPs to eliminate these positions from the analysis (bgzip supported)"
             },
             "dbSNPindex": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "dbSNPindex",
               "description": "In case of upload a VCF.GZ (bgzip) file, provide also the index. Not required but recommended. It can be generated with tabix"
             }
           }
@@ -125,17 +142,20 @@
             "None",
             "Other"
           ],
-          "description": "TSV provided by the image with positions that appear recurrently in a Panel of Normals to eliminate them from the analysis. In case you want to use your own PoN use the 'Other' argument and complete the 'PoNuser' option."
+          "title": "PoN",
+          "description": "TSV provided by the image with positions that appear recurrently in a Panel of Normals to eliminate them from the analysis. In case you want to use your own PoN use the 'Other' argument and complete the 'PoNuser' option"
         },
         "PoNuser": {
           "type": "object",
           "required": false,
+          "title": "PoNuser",
           "description": "Same as 'PoN', but provided by the user. Only when 'PoN' argument is 'Other'",
           "properties": {
             "PoNfile": {
               "type": "string",
               "format": "file",
               "required": true,
+              "title": "PoNfile",
               "description": "PoN provided by the user with positions to eliminate from the analysis (bgzip not supported)."
             }
           }
@@ -144,6 +164,7 @@
           "type": "string",
           "format": "file",
           "required": false,
+          "title": "regions",
           "description": "List of regions in which to make the call in VCF, BCF or TSV format"
         },
         "contamination": {
@@ -152,11 +173,13 @@
           "default": 0.05,
           "minimum": 0,
           "maximum": 1,
+          "title": "contamination",
           "description": "Percentage of tumor contamination in normal sample"
         },
         "assembly": {
           "type": "object",
           "required": false,
+          "title": "assembly",
           "description": "BCFTOOLS tag for ploidy to use in variant calling",
           "properties": {
             "assemblyTag": {
@@ -170,12 +193,14 @@
                 "Other",
                 "None"
               ],
+              "title": "assemblyTag",
               "description": "BCFTOOLS tag for ploidy to use in variant calling"
             },
             "assemblyFile": {
               "type": "string",
               "format": "file",
               "required": false,
+              "title": "assemblyFile",
               "description": "File with ploidy information. For more information use the command bcftools call --ploidy ?"
             }
           }
@@ -185,6 +210,7 @@
           "required": false,
           "default": 7,
           "minimum": 3,
+          "title": "TD_cov_SNV",
           "description": "Minimum coverage for tumor sample (SNVs)"
         },
         "TD_cov_INDEL": {
@@ -192,6 +218,7 @@
           "required": false,
           "default": 7,
           "minimum": 3,
+          "title": "TD_cov_INDEL",
           "description": "Minimum coverage for tumor sample (INDELs)"
         },
         "ND_cov_SNV": {
@@ -199,6 +226,7 @@
           "required": false,
           "default": 7,
           "minimum": 3,
+          "title": "ND_cov_SNV",
           "description": "Minimum coverage for normal sample (SNVs)"
         },
         "ND_cov_INDEL": {
@@ -206,6 +234,7 @@
           "required": false,
           "default": 7,
           "minimum": 3,
+          "title": "ND_cov_INDEL",
           "description": "Minimum coverage for normal sample (INDELs)"
         },
         "TD_mut_SNV": {
@@ -213,6 +242,7 @@
           "required": false,
           "default": 3,
           "minimum": 2,
+          "title": "TD_mut_SNV",
           "description": "Minimum number of mutated reads for a position in tumor sample to not discard it (SNVs)."
         },
         "TD_mut_INDEL": {
@@ -220,6 +250,7 @@
           "required": false,
           "default": 4,
           "minimum": 3,
+          "title": "TD_mut_INDEL",
           "description": "Minimum number of mutated reads for a position in tumor sample to not discard it (INDELs)."
         },
         "ND_mut_SNV": {
@@ -227,6 +258,7 @@
           "required": false,
           "default": 3,
           "minimum": 0,
+          "title": "ND_mut_SNV",
           "description": "Maximum number of mutated reads allowed for a position in normal sample (SNVs)."
         },
         "ND_mut_INDEL": {
@@ -234,6 +266,7 @@
           "required": false,
           "default": 2,
           "minimum": 0,
+          "title": "ND_mut_INDEL",
           "description": "Maximum number of mutated reads allowed for a position in normal sample (INDELs)."
         },
         "ND_window": {
@@ -241,24 +274,28 @@
           "required": false,
           "default": 10,
           "minimum": 5,
+          "title": "ND_window",
           "description": "Window size around a position to look for mutations in normal sample (INDELs)"
         },
         "SNV_threshold": {
           "type": "number",
           "required": false,
           "default": 10.726,
+          "title": "SNV_threshold",
           "description": "Minimum regression value to consider a SNV as good"
         },
         "INDEL_threshold": {
           "type": "number",
           "required": false,
           "default": 32.1418,
+          "title": "INDEL_threshold",
           "description": "Minimum regression value to consider an INDEL as good"
         },
         "polyINDEL_threshold": {
           "type": "number",
           "required": false,
           "default": 0.7723,
+          "title": "polyINDEL_threshold",
           "description": "Minimum regression value to consider an homopolymerINDEL as good"
         }
       }
@@ -272,21 +309,23 @@
           "type": "string",
           "format": "file",
           "required": true,
+          "title": "vcf",
           "description": "VCF with the mutations detected by the pipeline"
         },
         "log": {
           "type": "string",
           "format": "file",
           "required": true,
+          "title": "log",
           "description": "Log file"
         }
       }
     }
   },
-  "changeLog": "Initial version",
+  "changeLog": "Minor update",
   "scm": "https://github.com/xa-lab/RFcaller",
   "runtime": {
     "minMem": 20000
   },
-  "author": "Ander Díaz-Navarro & Xose S. Puente"
+  "author": "Ander Díaz-Navarro & Xose S Puente"
 }
