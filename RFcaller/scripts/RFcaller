@@ -71,7 +71,7 @@ Options:
   -nb, --normalBam	FILE	Path to normal BAM
   -t, --tumor		STR	Name for tumor files [${tumor}]
   -tb, --tumorBam	FILE	Path to tumor BAM
-  -o, --output		STR	Output file
+  -o, --output		STR	Output file name
 ------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
   -@			INT	Number of threads to use [${threads}]
   -r, --regions		FILE	List of regions in which to make the call in VCF, BCF or TSV format
