@@ -1,4 +1,4 @@
-[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue.svg?cacheSeconds=2592000) [![DOI](https://zenodo.org/badge/doi/10.1101/2022.05.11.491496.svg)](https://doi.org/10.1101/2022.05.11.491496)
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue) [![zenodo](https://img.shields.io/badge/docs-zenodo-green)](https://zenodo.org/record/7113432#.YzG0Ay8RrSw) [![DOI](https://zenodo.org/badge/doi/10.1101/2022.05.11.491496.svg)](https://doi.org/10.1101/2022.05.11.491496) 
 
 # RFcaller
 
