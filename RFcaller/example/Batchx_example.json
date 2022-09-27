@@ -1,0 +1,21 @@
+{
+	"normal": {
+		"normalBam": "normal.bam",
+		"normalName": "normal",
+		"normalIndex": "normal.bam.bai"
+	},
+	"tumor": {
+		"tumorBam": "tumor.bam",
+		"tumorName": "tumor",
+		"tumorIndex": "tumor.bam.bai"
+	},
+	"outputName": "test",
+	"genome": {
+		"genomeFasta": "hs37d5.fa",
+		"genomeIndexFai": "hs37d5.fa.fai"
+	},
+	"dbSNP": "hg19"
+}
+
+// One-liner command
+{ "normal": { "normalBam": "normal.bam", "normalName": "normal", "normalIndex": "normal.bam.bai" }, "tumor": { "tumorBam": "tumor.bam", "tumorName": "tumor", "tumorIndex": "tumor.bam.bai" }, "outputName": "test", "genome": { "genomeFasta": "hs37d5.fa", "genomeIndexFai": "hs37d5.fa.fai" }, "dbSNP": "hg19" }
