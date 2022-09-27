@@ -12,7 +12,7 @@ RUN ["/bin/bash", "-c", "unzip -qq -d /usr/local/bin/ bedtools.zip; rm bedtools.
 ## Copy necessary files
 COPY databases/ /home/databases/
 COPY RFcaller/ /home/RFcaller/
-LABEL io.batchx.manifest=08
+LABEL io.batchx.manifest=10
 COPY BatchX /batchx/manifest/
 RUN ["/bin/bash", "-c", "mkdir -p /batchx/output"]
 ## Entrypoint
