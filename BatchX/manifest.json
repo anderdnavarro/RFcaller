@@ -136,6 +136,7 @@
         "PoN": {
           "type": "string",
           "required": false,
+          "default": "hg19",
           "enum": [
             "hg19",
             "hg38",
@@ -165,7 +166,7 @@
           "format": "file",
           "required": false,
           "title": "regions",
-          "description": "List of regions in which to make the call in VCF, BCF or TSV format"
+          "description": "List of regions in which to make the call in VCF, BED or TSV format"
         },
         "contamination": {
           "type": "number",
