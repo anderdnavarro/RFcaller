@@ -1,10 +1,17 @@
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue) [![zenodo](https://img.shields.io/badge/docs-zenodo-green)](https://zenodo.org/record/7113432#.YzG0Ay8RrSw) [![DOI](https://zenodo.org/badge/doi/10.1101/2022.05.11.491496.svg)](https://doi.org/10.1101/2022.05.11.491496)
+
+[![License](https://images.batchx.io/gh-badge-logo.svg)](https://platform.batchx.io/uniovi/profile)
+
 # Context
 
 A pipeline that uses read-level features and [extra trees/random forest algorithms](https://en.wikipedia.org/wiki/Random_forest) for accurate and fast detection of somatic mutations in next generation sequencing data.
 
 # Input
+
 ## Required inputs
+
 This image has the following required inputs:
+
 1. `normalBam/tumorBam`: Normal/tumor [BAM](https://genome.ucsc.edu/FAQ/FAQformat.html#format5.1) *(CRAM supported)*.
 2. `normalName/tumorName`: Name of normal/tumor sample.
 3. `outputName`: Name of the analysis.
@@ -14,7 +21,9 @@ This image has the following required inputs:
     - Choices: `[hg19, hg38, Other]`
 
 ## Optional inputs
+
 This image provides additional configuration through the following optional inputs:
+
 1. `normalIndex/tumorIndex`: Index of normal/tumor BAM. Not required but recommended.
     - *To index a BAM file use `samtools index`*
 2. `genomeIndexFai`: FAI index of FASTA genome. Not required but recommended.
@@ -24,15 +33,18 @@ This image provides additional configuration through the following optional inpu
 4. `dbSNPfile`: VCF provided by the user with common SNPs to eliminate these positions from the analysis *(bgzip supported)*.
 5. `dbSNPindex`: In case of upload a VCF.GZ (bgzip) file, provide also the index. Not required but recommended.
     - *To index a VCF (bgzip) file use `tabix`*
-6. `positionsFile`: File with the positions to be included in the analysis VCF or [BED](https://www.ensembl.org/info/website/upload/bed.html) formats supported).
-7. `positionsFormat`: Format of the file with the positions to analyze.
-    - Choices: `[VCF, BED]`
-8. `assemblyTag`: [BCFTOOLS tag](http://samtools.github.io/bcftools/bcftools.html#call) for ploidy to use in variant calling. 
+6. `PoN`: TSV provided by the image with positions that appear recurrently in a Panel of Normals to eliminate them from the analysis. In case you want to use your own PoN use the *`Other`* argument and complete the *`PoNuser`* option.
+    - Default: `hg19`
+    - Choices: `[hg19, hg38, None, Other]`
+7. `PoNuser`: Same as *`PoN`* but provided by the user. Only when *`PoN`* argument is *`Other`*.
+8. `regions`: File with the positions to be included in the analysis (VCF, [BED](https://www.ensembl.org/info/website/upload/bed.html) and TSV formats supported).
+10. `assemblyTag`: [BCFTOOLS tag](http://samtools.github.io/bcftools/bcftools.html#call) for ploidy to use in variant calling. 
     - Default: `GRCh37`
     - Choices: `[GRCh37, GRCh38, GRCm38, GRCm39, Other, None]`
-9. `assemblyFile`: File with ploidy information. For more information use the command `bcftools call --ploidy ?`.
+11. `assemblyFile`: File with ploidy information. For more information use the command `bcftools call --ploidy ?`.
 
 ## Additional parameters
+
 The image has some extra parameters to use as filters:
 |      Parameter      |                                                                                                                                        Description                                                                                                                                       | Default |
 |:-------------------:|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-------:|
@@ -51,6 +63,7 @@ The image has some extra parameters to use as filters:
 | polyINDEL_threshold |                                                                                                                Minimum QUAL value to consider an homopolymerINDEL (mononucleotide microsatellites) as good                                                                                                               |  0.7723 |
 
 # Output
+
 At the end of RFcaller two files are generated:
 
 1. `mutations_${outputName}.vcf`: Final VCF with the mutations from SNV and INDEL pipelines.
@@ -58,17 +71,21 @@ At the end of RFcaller two files are generated:
 
 
 # Example
+
 The files used in this example can be downloaded from [xa-lab/RFcaller](https://github.com/xa-lab/RFcaller/tree/master/example) repository and the reference genome (GRCh37) [here](https://dcc.icgc.org/releases/PCAWG/reference_data/pcawg-bwa-mem). Then, we can upload them to our BatchX filesystem:
 
 ```bash
 bx cp RFcaller/example bx://example/
 ```
+
 > Note: Before uploading the genome we have to compress it with `bgzip`.
 
 ## How to create BAMs and FASTA index files
+
 RFcaller indexes files automatically if they are not provided by the user. However, it can be very useful to know how to create them from BatchX.
 
 ### *BAM indexation*
+
 To index a BAM we will use [batchx@bioinformatics/samtools/index](https://platform.batchx.io/batchx/images/bioinformatics%2Fsamtools%2Findex):
 
 ```bash
@@ -82,6 +99,7 @@ bx submit -v=1 -m=4000 batchx@bioinformatics/samtools/index '{
 ```
 
 ### *FASTA indexation*
+
 As the downloaded genome is compressed with `gzip` instead of `bgzip`, first we need to change it. To do that, we will use these two commands in our computer. Finally, we can upload the genome:
 
 ```bash
@@ -91,6 +109,7 @@ bx cp genome.fa.gz bx://reference/
 ```
 
 To index the FASTA we will use the [batchx@bioinformatics/samtools/faidx](https://platform.batchx.io/batchx/images/bioinformatics%2Fsamtools%2Ffaidx):
+
 ```bash
 bx submit -v=1 -m=3000 batchx@bioinformatics/samtools/faidx '{
   "fastaFile": "bx://reference/genome.fa.gz"
@@ -122,7 +141,9 @@ bx submit -v=20 -m=20000 uniovi@labxa/rfcaller '{
 ```
 
 ##  dbSNP provided by the user
+
 In case you want to provide your own dbSNP, the `input.json` should be like this:
+
 ```bash
 bx submit -v=20 -m=20000 uniovi@labxa/rfcaller '{
   "normal": {
@@ -150,6 +171,7 @@ bx submit -v=20 -m=20000 uniovi@labxa/rfcaller '{
 ```
 
 # Tools Version
+
 - [samtools](https://www.htslib.org/doc/1.10/samtools.html) (built with v1.10)
 - [bcftools](https://www.htslib.org/doc/1.10/bcftools.html) (built with v1.10.2)
 - [bedtools](https://bedtools.readthedocs.io/en/latest/) (built with v2.29.1)
