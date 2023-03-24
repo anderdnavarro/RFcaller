@@ -30,7 +30,7 @@ If you don't have docker already installed in your system, please follow these [
 We have created a docker image with all dependencies installed:
 
 ```bash
-docker pull labxa/rfcaller:1.1.0
+docker pull anderdnavarro/rfcaller:1.1.0
 ```
 
 The image has the following structure:
