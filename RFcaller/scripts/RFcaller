@@ -650,6 +650,7 @@ somaticSNV(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticSNV/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		keep='True'
 		return 1
 	fi
 
@@ -687,6 +688,7 @@ somaticSNV(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticSNV/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		keep='True'
 		return 1
 	fi
 
@@ -707,6 +709,7 @@ somaticSNV(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_SNV." "WARNING: All SNVs have been filtered"
+		keep='True'
 		return 1
 	fi
 
@@ -788,6 +791,7 @@ somaticINDEL(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.mini.pileup.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		keep='True'
 		return 1
 	fi
 	
@@ -827,6 +831,7 @@ somaticINDEL(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/${comparison}.prepare_muts.csv |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		keep='True'
 		return 1
 	fi
 
@@ -853,6 +858,7 @@ somaticINDEL(){
 	# Check that there are mutations to continue the pipeline
 	if [ "$(grep -v '^#' ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf |wc -l |awk '{print $1}')" -eq 0 ]; then
 		log "${comparison}" "_INDEL." "WARNING: All INDELs have been filtered"
+		keep='True'
 		return 1
 	fi
 
