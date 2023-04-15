@@ -67,9 +67,9 @@ Options:
 				NORMAL_NAME NORMAL_BAM TUMOR_NAME TUMOR_BAM OUTPUT_NAME (optional: VCF/BED)
   -b, --bamsDir		DIR	Main directory where BAMs are located [${bamsDir}]
 -----------------------------------------------------  or  -----------------------------------------------------
-  -n, --normal		STR	Name for normal files [${normal}]
+  --normal		STR	Name for normal files [${normal}]
   -nb, --normalBam	FILE	Path to normal BAM
-  -t, --tumor		STR	Name for tumor files [${tumor}]
+  --tumor		STR	Name for tumor files [${tumor}]
   -tb, --tumorBam	FILE	Path to tumor BAM
   -o, --output		STR	Output file name
 ------------------------------------------------  OTHER OPTIONS  -----------------------------------------------
