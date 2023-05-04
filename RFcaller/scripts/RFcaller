@@ -967,14 +967,14 @@ refinement() {
 	if [ "${resSNV}" -eq 0 ] && [ "${resINDEL}" -eq 0 ]; then
 		log "${comparison}" "." "Merging SNVs and INDELs"
 		log "${comparison}" "." "-- COMMAND: bcftools concat -a -o ${comparison}/mutations_${comparison}.vcf ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz"
-		bcftools concat -a ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+		bcftools concat -a ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -O v - |mutID.py > ${comparison}/mutations_${comparison}.vcf 
 		log "${comparison}" "." "---- RESULT: $(bcftools view -H ${comparison}/mutations_${comparison}.vcf |wc -l |awk '{print $1}') mutations (SNVs+INDELs) have been detected in ${comparison}"
 	elif [ "${resSNV}" -eq 0 ]; then
 		log "${comparison}" "." "Exporting only SNVs because there are no INDELs"
-		bcftools view ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+		bcftools view ${comparison}/somaticSNV/mutations_SNVs_${comparison}.vcf.gz |bcftools sort -O v - |mutID.py > ${comparison}/mutations_${comparison}.vcf
 	elif [ "${resINDEL}" -eq 0 ]; then
 		log "${comparison}" "." "Exporting only INDELs because there are no SNVs"
-		bcftools view ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -o ${comparison}/mutations_${comparison}.vcf -
+		bcftools view ${comparison}/somaticINDEL/mutations_INDELs_${comparison}.vcf.gz |bcftools sort -O v - |mutID.py > ${comparison}/mutations_${comparison}.vcf
 	else
 		log "${comparison}" "." "No mutations have been found for ${comparison}"
 	fi
