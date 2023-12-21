@@ -393,8 +393,8 @@ log(){
 
 ## Control the number of threads to use
 multithreads(){
-	while [ "$(ps auxr |grep -e "bcftools mpileup" -e "samtools view" -e "samtools mpileup" |wc -l )" -ge "$1" ]; do
-		sleep 30
+	while [ "$(ps auxr |grep -e "bcftools mpileup" -e "samtools view" -e "samtools mpileup" -e "samtools stats" |wc -l )" -ge "$1" ]; do
+		sleep 3
 	done
 
 	if [ "$2" != '-' ]; then	
@@ -467,67 +467,50 @@ extract_reduced_BAM(){
 	bam=$2
 	pipeline=$3
 	comparison=$4
+	let sort_threads=${threads}/8 index_threads=${threads}/4
+	[[ ${sort_threads} -eq 0 ]] && sort_threads=1
+	[[ ${index_threads} -eq 0 ]] && index_threads=1	
 
-	## Create a tempral directory
-	mkdir ${comparison}/somatic${pipeline}/tmp_${name}
+	log "${comparison}" "_${pipeline}." "---- COMMAND: samtools view -u -T ${genome} -G 0x400 ${bam} -M REGIONS | samtools sort -@ ${sort_threads} -n -O SAM - | removeOverlapping.py |samtools sort -@ ${sort_threads} -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
 
-	log "${comparison}" "_${pipeline}." "---- COMMAND: samtools view -u -T ${genome} -G 0x400 ${bam} REGIONS >>${comparison}/somatic${pipeline}/tmp_${name}/tmp_reduce_${name}.bam"
-
-	## Launch samtools view by regions which is faster than reading all the BAM
-	# Read the file with the positions
-	i=1
-	z=1
-	merge_files=''
-	process_id_view=''
-	cat ${comparison}/somatic${pipeline}/reduced.positions | { while read -r chrom pos; do
-		if [ "${pipeline}" = "SNV" ]; then
-			start=$(echo -e ${pos} |awk '{$1-=10} END {print $1}')
-			end=$(echo -e ${pos} |awk '{$1+=10} END {print $1}')
-		elif [ "${pipeline}" = "INDEL" ]; then
-			start=$(echo -e ${pos} |awk '{$1-=30} END {print $1}')
-			end=$(echo -e ${pos} |awk '{$1+=30} END {print $1}')
-		fi
-		extended_region=${chrom}:${start}-${end}
-		echo -e ${extended_region} |tr "\n" "\t" >>${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed
-
-		# If there are 5000 regions, then extract readings overlaping these regions
-		i=$(echo -e ${i} |awk '{$1+=1} END {print $1}')
-		if [ ${i} -eq 5000 ]; then
-			samtools view -u -T ${genome} -G 0x400 ${bam} $(cat ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed) >${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam &
-			process_id_view=$!
-			i=1
-			merge_files="${merge_files} ${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam"
-			z=$(echo -e ${z} |awk '{$1+=1} END {print $1}')
-		fi
-
-		# Control the number of threads
-		multithreads ${threads} 4
-
-	done
-	# Launch samtools with last regions
-	if [ -f ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed ]; then
-		samtools view -u -T ${genome} -G 0x400 ${bam} $(cat ${comparison}/somatic${pipeline}/tmp_${name}/${z}_regions_${name}.bed) >${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam
-		merge_files="${merge_files} ${comparison}/somatic${pipeline}/tmp_${name}/tmp_${z}_reduce_${name}.bam"
+	if [ "${pipeline}" = "SNV" ]; then
+		extension=10
+	elif [ "${pipeline}" = "INDEL" ]; then
+		extension=30
 	fi
-	wait ${process_id_view}
 
-	## Sort SAM by read and filter duplicate reads, then sort by pos and finally index it
-	log "${comparison}" "_${pipeline}." "---- Removing duplicates reads for ${name}"
-	if [ "${threads}" -le 6 ]; then
-		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 1 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 1 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
-		samtools merge -u - ${merge_files} |samtools sort -@ 1 -n -O SAM - |removeOverlapping.py |samtools sort -@ 1 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
-	elif [ "${threads}" -le 12 ]; then
-		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 3 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 3 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
-		samtools merge -u - ${merge_files} |samtools sort -@ 3 -n -O SAM - |removeOverlapping.py |samtools sort -@ 3 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
-	else
-		log "${comparison}" "_${pipeline}." "------ COMMAND: samtools sort -@ 6 -n -O SAM ${comparison}/somatic${pipeline}/tmp/tmp_reduce_${name}.sam |removeOverlapping.py |samtools sort -@ 6 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -"
-		samtools merge -u - ${merge_files} |samtools sort -@ 6 -n -O SAM - |removeOverlapping.py |samtools sort -@ 6 -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
-	fi }
-	samtools index ${comparison}/somatic${pipeline}/reduced_${name}.bam
-	rm -rf ${comparison}/somatic${pipeline}/tmp_${name}
+	awk -v ext="$extension" '{print $1"\t"$2-ext"\t"$2+ext}' ${comparison}/somatic${pipeline}/reduced.positions > ${comparison}/somatic${pipeline}/exp.regions
+	samtools view -u -T ${genome} -G 0x400 ${bam} -M -L  ${comparison}/somatic${pipeline}/exp.regions | samtools sort -@ ${sort_threads} -n -O SAM - | removeOverlapping.py |samtools sort -@ ${sort_threads} -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
+	samtools index -@ ${index_threads} ${comparison}/somatic${pipeline}/reduced_${name}.bam
 }
 
 ## Extract statistics from the normal and reduced BAM for each mutation
+per_position_stats(){
+		chrom=$1
+		pos=$2
+		pipeline=$3
+		comparison=$4
+		name=$5
+		genome=$6
+		extended_region=$7
+		pos_name=${chrom}_${pos}
+		tmp_dir=${comparison}/somatic${pipeline}/tmp_stats/${chrom}_${pos}
+		[[ ! -d ${tmp_dir} ]] && mkdir ${tmp_dir}
+		# Get the stats
+		samtools stats -d -r ${genome} ${comparison}/somatic${pipeline}/reduced_${name}.bam ${chrom}:${pos}-${pos} >${tmp_dir}/tmp_${name}.stats
+		bases_mapped=$(cat ${tmp_dir}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^bases mapped (cigar)' |awk '{print $4}')
+		mismatches=$(cat ${tmp_dir}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^mismatches' |awk '{print $2}')
+		echo -e "${pos_name}\t${bases_mapped}\t${mismatches}" >>${tmp_dir}/${name}.stats
+		if [ "${pipeline}" = "INDEL" ]; then
+			indel_distribution=$(cat ${tmp_dir}/tmp_${name}.stats |grep ^ID |cut -f 2- |filterDist.py -i -)
+			echo -e "${pos_name}\t${indel_distribution}" >>${tmp_dir}/${name}.distribution
+		fi
+		# Get the cigar
+		cigar=$(samtools view ${comparison}/somatic${pipeline}/reduced_${name}.bam ${extended_region}  |awk '{print $6}' |tr '\n' ';')
+		echo -e "${pos_name}\t${cigar}" >>${tmp_dir}/${name}.cigar
+}
+
+
 extract_BAM_stats(){
 	## Arguments
 	name=$1
@@ -540,6 +523,7 @@ extract_BAM_stats(){
 		log "${comparison}" "_${pipeline}." "---- COMMAND: samtools mpileup -aa -R -B -s -f ${genome} -l ${comparison}/somaticSNV/common.positions ${comparison}/somaticSNV/reduced_${name}.bam >${comparison}/somaticSNV/${name}.mapq"
 		samtools mpileup -aa -R -B -s -Q 10 -f ${genome} -l ${comparison}/somaticSNV/common.positions ${comparison}/somaticSNV/reduced_${name}.bam >${comparison}/somaticSNV/${name}.mapq &
 		process_id_mapq=$!
+		extension=10
 	elif [ ${pipeline} = 'INDEL' ]; then
 		log "${comparison}" "_${pipeline}." "-- Extracting the mapping quality for reads supporting each INDEL for ${name}"
 		log "${comparison}" "_${pipeline}." "---- COMMAND: samtools mpileup -aa -R -s -f ${genome} -l ${comparison}/somaticINDEL/common.positions ${comparison}/somaticINDEL/reduced_${name}.bam >${comparison}/somaticINDEL/${name}.mapq"
@@ -547,6 +531,7 @@ extract_BAM_stats(){
 		process_id_mapq=$!
 		samtools mpileup -aa -R -B -s -Q 10 -f ${genome} -l ${comparison}/somaticINDEL/long_common.positions ${comparison}/somaticINDEL/reduced_${name}.bam >${comparison}/somaticINDEL/${name}_long.mapq &
 		process_id_mapq="${process_id_mapq} $!"
+		extension=15
 	fi
 
 	## Extract alignmet stats
@@ -558,33 +543,26 @@ extract_BAM_stats(){
 		echo -e "#Case\t${name}_insertion_count\t${name}_insertion_lenght\t${name}_deletion_count\t${name}_deletion_lenght" >${comparison}/somatic${pipeline}/${name}.distribution
 	fi
 	# Read the file with the positions
+	process_id_stats=""
+	mkdir ${comparison}/somatic${pipeline}/tmp_stats
 	cat ${comparison}/somatic${pipeline}/common.positions |while read -r chrom pos; do
-		pos_name=${chrom}_${pos}
-		if [ "${pipeline}" = "SNV" ]; then
-			start=$(echo -e ${pos} |awk '{$1-=10} END {print $1}')
-			end=$(echo -e ${pos} |awk '{$1+=10} END {print $1}')
-		elif [ "${pipeline}" = "INDEL" ]; then
-			start=$(echo -e ${pos} |awk '{$1-=15} END {print $1}')
-			end=$(echo -e ${pos} |awk '{$1+=15} END {print $1}')
-		fi
-		extended_region=${chrom}:${start}-${end}
-		# Create temporal bam
-		samtools view -uh ${comparison}/somatic${pipeline}/reduced_${name}.bam ${extended_region} >${comparison}/somatic${pipeline}/tmp_${name}.bam
-		samtools index ${comparison}/somatic${pipeline}/tmp_${name}.bam
-		# Get the stats
-		samtools stats -d -r ${genome} ${comparison}/somatic${pipeline}/tmp_${name}.bam ${chrom}:${pos}-${pos} >${comparison}/somatic${pipeline}/tmp_${name}.stats
-		bases_mapped=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^bases mapped (cigar)' |awk '{print $4}')
-		mismatches=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep '^SN' |cut -f 2- |grep '^mismatches' |awk '{print $2}')
-		echo -e "${pos_name}\t${bases_mapped}\t${mismatches}" >>${comparison}/somatic${pipeline}/${name}.stats
-		if [ "${pipeline}" = "INDEL" ]; then
-			indel_distribution=$(cat ${comparison}/somatic${pipeline}/tmp_${name}.stats |grep ^ID |cut -f 2- |filterDist.py -i -)
-			echo -e "${pos_name}\t${indel_distribution}" >>${comparison}/somatic${pipeline}/${name}.distribution
-		fi
-		# Get the cigar
-		cigar=$(samtools view ${comparison}/somatic${pipeline}/tmp_${name}.bam |awk '{print $6}' |tr '\n' ';')
-		echo -e "${pos_name}\t${cigar}" >>${comparison}/somatic${pipeline}/${name}.cigar
+		start=$(( ${pos} - ${extension} ))
+		end=$(( ${pos} + ${extension} ))
+		per_position_stats ${chrom} ${pos} ${pipeline} ${comparison} ${name} ${genome} ${chrom}:${start}-${end} &
+		process_id_stats="${process_id_stats} $!"
+		multithreads ${threads} -
 	done
-	rm ${comparison}/somatic${pipeline}/tmp_${name}.bam* ${comparison}/somatic${pipeline}/tmp_${name}.stats
+	wait ${process_id_stats}
+
+	#Merge stats in ordered as in common.positions
+	cat ${comparison}/somatic${pipeline}/common.positions |while read -r chrom pos; do
+		tmp_dir=${comparison}/somatic${pipeline}/tmp_stats/${chrom}_${pos}
+		cat ${tmp_dir}/${name}.stats >>${comparison}/somatic${pipeline}/${name}.stats
+		cat ${tmp_dir}/${name}.cigar >>${comparison}/somatic${pipeline}/${name}.cigar
+		[[ -f ${tmp_dir}/${name}.distribution ]] && cat ${tmp_dir}/${name}.distribution  >>${comparison}/somatic${pipeline}/${name}.distribution
+	done
+
+	rm -rf ${comparison}/somatic${pipeline}/tmp_stats
 
 	## Wait until mapq is finished
 	wait ${process_id_mapq}
@@ -666,12 +644,8 @@ somaticSNV(){
 	checkSequence.py -p ${comparison}/somaticSNV/common.positions -r ${genome} >${comparison}/somaticSNV/${comparison}.sequence &
 
 	## BAM stats
-	extract_BAM_stats ${normal} SNV ${comparison} &
-	process_id_BAM_stats=$!
-	sleep 5
-	extract_BAM_stats ${tumor} SNV ${comparison} &
-	process_id_BAM_stats="${process_id_BAM_stats} $!"
-	wait ${process_id_BAM_stats}
+	extract_BAM_stats ${normal} SNV ${comparison} 
+	extract_BAM_stats ${tumor} SNV ${comparison}
 
 	## Merge cigar and stats files
 	log "${comparison}" "_SNV." "-- Merging cigar and stats files"
@@ -807,12 +781,8 @@ somaticINDEL(){
 	checkSequence.py -p ${comparison}/somaticINDEL/common.positions -r ${genome} >${comparison}/somaticINDEL/${comparison}.sequence &
 
 	## BAM stats
-	extract_BAM_stats ${normal} INDEL ${comparison} &
-	process_id_BAM_stats=$!
-	sleep 5
-	extract_BAM_stats ${tumor} INDEL ${comparison} &
-	process_id_BAM_stats="${process_id_BAM_stats} $!"
-	wait ${process_id_BAM_stats}
+	extract_BAM_stats ${normal} INDEL ${comparison} 
+	extract_BAM_stats ${tumor} INDEL ${comparison} 
 
 	## Merge cigar and stats files
 	log "${comparison}" "_INDEL." "-- Merging cigar and stats files"
@@ -1057,7 +1027,7 @@ calling(){
 			return 1
 		fi
 		# Extract regions for multithreading
-		vcfutils.pl splitchr -l 50000000 /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
+		vcfutils.pl splitchr -l 1000000 /tmp/.tmp.fai > ${comparison}/calling/tmp/.tmp.split.fai
 		for i in $(cat /tmp/.tmp.bai); do grep -w "^${i}" ${comparison}/calling/tmp/.tmp.split.fai; done > ${comparison}/calling/tmp/bcf_split.coords
 		# Call
 		for i in $(cat ${comparison}/calling/tmp/bcf_split.coords); do
