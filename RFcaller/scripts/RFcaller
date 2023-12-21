@@ -355,6 +355,11 @@ argparse(){
 		help
 	fi
 
+	if [ "${tumor}" = "${comparison}" ]; then
+		echo -e "ERROR: Tumor and Output names cannot be the same"
+		exit 0
+	fi
+
 	# Search for incompatibilities between versions
 	if ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCh38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCh37" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg19" ] && [ "${ploidy_file}" = "GRCm39" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm38" ]) || ([ "${dbSNPtag}" = "hg38" ] && [ "${ploidy_file}" = "GRCm39" ]); then
 		echo -e "ERROR: dbSNP and ploidy_file fields must correspond to the same genome version\n"
