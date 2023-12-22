@@ -1132,23 +1132,23 @@ calling(){
 			if [ $(wc -l ${comparison}/calling/tmp/${i}.pos |awk '{print $1}') -ne 0 ]; then 
 				if [ "${ploidy_file}" = "GRCh37" ] || [ "${ploidy_file}" = "GRCh38" ]; then
 					if [ "${i}" != "Y"  ]; then
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy ${ploidy_file} &
 						process_id_calling="${process_id_calling} $!"
 					else
-						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+						bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
 						process_id_calling="${process_id_calling} $!"
 					fi
 				elif [ "${ploidy_file}" = "GRCm38" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm38.ploidy.file &
 					process_id_calling="${process_id_calling} $!"
 				elif [ "${ploidy_file}" = "GRCm39" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file /home/databases/ploidy_files/GRCm39.ploidy.file &
 					process_id_calling="${process_id_calling} $!"
 				elif [ "${ploidy_file}" = "None" ]; then
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 &
 					process_id_calling="${process_id_calling} $!"
 				else
-					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -T ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
+					bcftools mpileup -Q 20 -B --ignore-RG -a 'DP,AD,ADF,ADR,SP' -d 250 -O u -f ${genome} -r ${i} -R ${comparison}/calling/tmp/${i}.pos ${normal_bam} ${tumor_bam} |bcftools call -vmO u -o ${comparison}/calling/tmp/${i}.bcf -P 1e-1 --ploidy-file ${ploidy_file} &
 					process_id_calling="${process_id_calling} $!"
 				fi
 				merge_files="${merge_files} ${comparison}/calling/tmp/${i}.bcf"
