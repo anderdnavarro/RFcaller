@@ -484,7 +484,7 @@ extract_reduced_BAM(){
 		extension=30
 	fi
 
-	awk -v ext="$extension" '{print $1"\t"$2-ext"\t"$2+ext}' ${comparison}/somatic${pipeline}/reduced.positions > ${comparison}/somatic${pipeline}/exp.regions
+	awk -v ext="$extension" '{print $1"\t"$2-ext-1"\t"$2+ext}' ${comparison}/somatic${pipeline}/reduced.positions > ${comparison}/somatic${pipeline}/exp.regions
 	samtools view -u -T ${genome} -G 0x400 ${bam} -M -L  ${comparison}/somatic${pipeline}/exp.regions | samtools sort -@ ${sort_threads} -n -O SAM - | removeOverlapping.py |samtools sort -@ ${sort_threads} -o ${comparison}/somatic${pipeline}/reduced_${name}.bam -
 	samtools index -@ ${index_threads} ${comparison}/somatic${pipeline}/reduced_${name}.bam
 }
