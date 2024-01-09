@@ -619,7 +619,7 @@ somaticSNV(){
 		process_id_pileup_SNV="${process_id_pileup_SNV} $!"
 		merge_files="${merge_files} ${comparison}/somaticSNV/tmp/${i}.mini.pileup"
 		# Control the number of threads
-		multithreads ${threads} 6
+		multithreads ${threads} 8
 	done
 	wait ${process_id_pileup_SNV}
 	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticSNV/reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
@@ -738,7 +738,7 @@ somaticINDEL(){
 		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
 		merge_files="${merge_files} ${comparison}/somaticINDEL/tmp/${i}.short_indel.mini.pileup"
 		# Control the number of threads
-		multithreads ${threads} 6
+		multithreads ${threads} 8
 	done
 	wait ${process_id_pileup_INDEL}
 	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/short_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
@@ -753,7 +753,7 @@ somaticINDEL(){
 		process_id_pileup_INDEL="${process_id_pileup_INDEL} $!"
 		merge_files="${merge_files} ${comparison}/somaticINDEL/tmp/${i}.long_indel.mini.pileup"
 		# Control the number of threads
-		multithreads ${threads} 6
+		multithreads ${threads} 8
 	done
 	wait ${process_id_pileup_INDEL}
 	for i in $(bedtools intersect -wa -a <(vcfutils.pl splitchr -l 10000000 ${genome}.fai | sed 's@\(.*\):\(.*\)-@\1\t\2\t@g') -b <(awk '{print $1"\t"$2"\t"$2}' ${comparison}/somaticINDEL/long_reduced.positions)|uniq |awk '{print $1":"$2"-"$3}'); do
