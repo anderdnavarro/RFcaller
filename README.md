@@ -1,4 +1,4 @@
-[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.1.0-blue) [![zenodo](https://img.shields.io/badge/docs-zenodo-green)](https://zenodo.org/record/7113432#.YzG0Ay8RrSw) [![DOI](https://zenodo.org/badge/doi/10.1093/nargab/lqad056.svg)](https://doi.org/10.1093/nargab/lqad056)
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](https://github.com/xa-lab/RFcaller/tree/master/LICENSE) ![version](https://img.shields.io/badge/version-1.2.0-blue) [![zenodo](https://img.shields.io/badge/docs-zenodo-green)](https://zenodo.org/record/7113432#.YzG0Ay8RrSw) [![DOI](https://zenodo.org/badge/doi/10.1093/nargab/lqad056.svg)](https://doi.org/10.1093/nargab/lqad056)
 
 # RFcaller
 
@@ -30,7 +30,7 @@ If you don't have docker already installed in your system, please follow these [
 We have created a docker image with all dependencies installed:
 
 ```bash
-docker pull labxa/rfcaller:1.1.0
+docker pull labxa/rfcaller:1.2.0
 ```
 
 The image has the following structure:
@@ -72,7 +72,7 @@ unzip databases.zip
 cp -r databases/dbSNP RFcaller/databases
 rm -rf databases databases.zip
 cd RFcaller
-docker build -t labxa/rfcaller:1.1.0 .
+docker build -t labxa/rfcaller:1.2.0 .
 ```
 
 ## Quick usage
@@ -81,10 +81,10 @@ Here is basic configuration, for more information see [docker](#Docker-options) 
 
 ```bash
 # Single case
-docker run --rm -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -@ INT -nb /bams/NORMAL.BAM -tb /bams/TUMOR.BAM -o OUTPUT --genome /genome/GENOME.FA --dbSNP hg19
+docker run --rm -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -@ INT -nb /bams/NORMAL.BAM -tb /bams/TUMOR.BAM -o OUTPUT --genome /genome/GENOME.FA --dbSNP hg19
 
 # Multiple cases
-docker run --rm -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19
+docker run --rm -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19
 ```
 
 ## Docker options
@@ -199,7 +199,7 @@ Imagine that you have the following configuration:
 If we use the following command to run RFcaller:
 
 ```bash
-docker run --rm -v /home/RFcaller/example/:/bams/ -v /home/genomes/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -i /bams/example.metadata --genome /genome/hg19.fa --dbSNP hg19
+docker run --rm -v /home/RFcaller/example/:/bams/ -v /home/genomes/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -i /bams/example.metadata --genome /genome/hg19.fa --dbSNP hg19
 ```
 
 The example.metadata file should be:
@@ -245,7 +245,7 @@ To make it clear how to use the Docker options together with RFcaller, we have p
 In the event that we were working in the `/home/` directory:
 
 ```bash
-docker run --rm -v /data/bams/:/example_bams/ -v /data/hg19_genome/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -i complex_example/example.metadata --bamsDir /example_bams/ --genome /genome/hg19.fa --dbSNP hg19 
+docker run --rm -v /data/bams/:/example_bams/ -v /data/hg19_genome/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -i complex_example/example.metadata --bamsDir /example_bams/ --genome /genome/hg19.fa --dbSNP hg19 
 ```
 
 The distribution of the files will be:
@@ -272,13 +272,13 @@ A more detailed explanation:
 The time zone of the docker image is `Europe/Madrid` and it's used to set the time for the log file. To change this, add the `-e` option to set environment variables:
 
 ```bash
-docker run --rm -e "TZ=$(cat /etc/timezone)" -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19/hg38
+docker run --rm -e "TZ=$(cat /etc/timezone)" -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19/hg38
 ```
 
 Or set it manually (to know your TZ visit: [TZ database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones))
 
 ```bash
-docker run --rm -e "TZ=America/Toronto" -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.1.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19/hg38
+docker run --rm -e "TZ=America/Toronto" -v /BAMS_PATH/:/bams/ -v /GENOME_PATH/:/genome/ -v $(pwd):/output/ -u $(id -u):$(id -g) -it labxa/rfcaller:1.2.0 -@ INT -i INPUT.LIST --genome /genome/GENOME.FA --dbSNP hg19/hg38
 ```
 
 ## Outputs
